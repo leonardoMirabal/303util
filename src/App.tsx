@@ -111,6 +111,17 @@ const defaultProjectLines = (): LineState[] => {
   return lines;
 };
 
+const resetProjectState = () => ({
+  lineCount: 2 as 2 | 3,
+  patternLength: 8,
+  tempo: 126,
+  programName: "Program",
+  selectedLine: 0,
+  lines: defaultProjectLines(),
+});
+
+const DEFAULT_PROJECT_STATE = resetProjectState();
+
 const noteToFrequency = (note: PitchName): number => {
   const match = note.match(/^([A-G])(#|b)?(\d)$/);
   if (!match) return 220;
@@ -204,13 +215,13 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
 };
 
 function App() {
-  const [lineCount, setLineCount] = useState<2 | 3>(2);
-  const [patternLength, setPatternLength] = useState(8);
-  const [tempo, setTempo] = useState(126);
-  const [programName, setProgramName] = useState("Program");
+  const [lineCount, setLineCount] = useState<2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
+  const [patternLength, setPatternLength] = useState(DEFAULT_PROJECT_STATE.patternLength);
+  const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
+  const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
-  const [lines, setLines] = useState<LineState[]>(() => defaultProjectLines());
-  const [selectedLine, setSelectedLine] = useState(0);
+  const [lines, setLines] = useState<LineState[]>(() => DEFAULT_PROJECT_STATE.lines);
+  const [selectedLine, setSelectedLine] = useState(DEFAULT_PROJECT_STATE.selectedLine);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(-1);
   const [exportPreviewUrl, setExportPreviewUrl] = useState<string | null>(null);
@@ -737,6 +748,19 @@ function App() {
     }
   };
 
+  const resetToDefaultPattern = () => {
+    const defaults = resetProjectState();
+    setIsPlaying(false);
+    setPlayhead(-1);
+    stepRef.current = 0;
+    setProgramName(defaults.programName);
+    setLineCount(defaults.lineCount);
+    setPatternLength(defaults.patternLength);
+    setTempo(defaults.tempo);
+    setSelectedLine(defaults.selectedLine);
+    setLines(defaults.lines);
+  };
+
   useEffect(() => {
     const url = buildExportDataUrl();
     if (url) setExportPreviewUrl(url);
@@ -772,7 +796,7 @@ function App() {
               <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
             </label>
             <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
-            <button onClick={() => setPlayhead(-1)}>Reset</button>
+            <button onClick={resetToDefaultPattern}>Reset</button>
             <button onClick={exportProjectJson}>Export JSON</button>
             <button onClick={() => importRef.current?.click()}>Import JSON</button>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
