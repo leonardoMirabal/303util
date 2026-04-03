@@ -1242,9 +1242,17 @@ function App() {
   const params = lines[selectedLine].params;
   const patternLength = lines[selectedLine].patternLength;
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
+  const shouldShowRotateOverlay =
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 860px) and (orientation: portrait)").matches;
 
   return (
     <main className="app">
+      {shouldShowRotateOverlay ? (
+        <div className="rotate-overlay">
+          <p>Rotate your phone to landscape to use 303 util.</p>
+        </div>
+      ) : null}
       <header className="panel header-panel">
         <div className="header-row">
           <h1>TB-303 Companion</h1>
