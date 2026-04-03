@@ -16,10 +16,28 @@ echo "Building web app..."
 cd "${APP_DIR}"
 npm run build
 
-echo "Syncing dist -> 303util root..."
+echo "Syncing dist -> 303util root (safe mode)..."
 mkdir -p "${PAGES_DIR}"
-find "${PAGES_DIR}" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-cp -R "${DIST_DIR}/." "${PAGES_DIR}/"
+
+if [ ! -d "${DIST_DIR}" ]; then
+  echo "Error: ${DIST_DIR} does not exist."
+  exit 1
+fi
+
+cp -f "${DIST_DIR}/index.html" "${PAGES_DIR}/index.html"
+
+if [ -f "${DIST_DIR}/vite.svg" ]; then
+  cp -f "${DIST_DIR}/vite.svg" "${PAGES_DIR}/vite.svg"
+fi
+
+if [ -f "${DIST_DIR}/tauri.svg" ]; then
+  cp -f "${DIST_DIR}/tauri.svg" "${PAGES_DIR}/tauri.svg"
+fi
+
+if [ -d "${PAGES_DIR}/assets" ]; then
+  rm -rf "${PAGES_DIR}/assets"
+fi
+cp -R "${DIST_DIR}/assets" "${PAGES_DIR}/assets"
 
 echo "Done. Next:"
 echo "  cd ${PAGES_DIR}"
