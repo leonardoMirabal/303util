@@ -209,6 +209,12 @@ button.selected {
   padding: 0 9px;
 }
 
+.mobile-hardware-bar,
+.mobile-controls-toggle,
+.mobile-aux-controls {
+  display: none;
+}
+
 .delay-divider {
   width: 1px;
   background: #8b939f;
@@ -560,9 +566,43 @@ button.selected {
 
   .hardware-panel {
     margin: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mobile-hardware-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    min-height: 28px;
+  }
+
+  .mobile-controls-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.66rem;
+    white-space: nowrap;
+  }
+
+  .desktop-aux-controls,
+  .desktop-aux-divider {
+    display: none;
+  }
+
+  .mobile-aux-controls {
+    display: flex;
+    margin-left: auto;
+    gap: 2px;
+    min-width: 0;
     overflow-x: auto;
-    overflow-y: hidden;
     scrollbar-width: thin;
+    padding-bottom: 1px;
   }
 
   .panel {
@@ -575,7 +615,7 @@ button.selected {
 
   .header-panel h1 {
     font-size: 0.9rem;
-    min-width: 120px;
+    min-width: 72px;
   }
 
   .header-primary-actions,
@@ -583,18 +623,38 @@ button.selected {
     gap: 3px;
   }
 
+  .header-primary-actions {
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
   .header-actions {
     overflow-x: auto;
     scrollbar-width: thin;
     padding-bottom: 1px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .header-actions.mobile-collapsed {
+    display: none;
+  }
+
+  .header-small {
+    min-width: 46px;
+  }
+
+  .header-small input,
+  .header-small select {
+    min-width: 42px;
   }
 
   .header-program {
-    min-width: 110px;
+    min-width: 92px;
   }
 
   .header-program input {
-    min-width: 90px;
+    min-width: 86px;
   }
 
   button,
@@ -605,9 +665,9 @@ button.selected {
   }
 
   .header-primary-actions .play-button {
-    min-width: 72px;
-    font-size: 0.82rem;
-    padding: 4px 8px;
+    min-width: 62px;
+    font-size: 0.8rem;
+    padding: 3px 7px;
   }
 
   .editor-sheet-row {
@@ -670,6 +730,13 @@ button.selected {
     gap: 4px;
     width: max-content;
     min-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .knob-groups.mobile-collapsed {
+    display: none;
   }
 
   .delay-divider {

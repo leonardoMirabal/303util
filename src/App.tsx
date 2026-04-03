@@ -320,6 +320,15 @@ function App() {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
   const [selectedPatternId, setSelectedPatternId] = useState<string>(() => window.localStorage.getItem(LAST_PATTERN_ID_KEY) ?? "");
   const [storageAction, setStorageAction] = useState("menu");
+  const [isPhoneLandscape, setIsPhoneLandscape] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches,
+  );
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(
+    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches),
+  );
+  const [mobileProjectOpen, setMobileProjectOpen] = useState(
+    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches),
+  );
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1239,12 +1248,57 @@ function App() {
     if (url) setExportPreviewUrl(url);
   }, [lines, selectedLine, tempo, programName]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 980px) and (orientation: landscape)");
+    const syncLandscapeState = () => {
+      const isLandscapePhone = mediaQuery.matches;
+      setIsPhoneLandscape(isLandscapePhone);
+      if (!isLandscapePhone) {
+        setMobileControlsOpen(true);
+        setMobileProjectOpen(true);
+      }
+    };
+    syncLandscapeState();
+    mediaQuery.addEventListener("change", syncLandscapeState);
+    return () => mediaQuery.removeEventListener("change", syncLandscapeState);
+  }, []);
+
   const params = lines[selectedLine].params;
   const patternLength = lines[selectedLine].patternLength;
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const shouldShowRotateOverlay =
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 860px) and (orientation: portrait)").matches;
+  const controlsToggleLabel = mobileControlsOpen ? "Hide Controls" : "Controls";
+  const projectToggleLabel = mobileProjectOpen ? "Hide Project" : "Project";
+
+  const renderAuxControls = (extraClassName?: string) => (
+    <div className={extraClassName ? `aux-controls ${extraClassName}` : "aux-controls"}>
+      {Array.from({ length: lineCount }, (_, i) => (
+        <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
+          VOICE {i + 1}
+        </button>
+      ))}
+      <div className="view-toggle" role="tablist" aria-label="Workspace view">
+        <button
+          role="tab"
+          aria-selected={workspaceView === "editor"}
+          className={workspaceView === "editor" ? "selected" : ""}
+          onClick={() => setWorkspaceView("editor")}
+        >
+          Editor
+        </button>
+        <button
+          role="tab"
+          aria-selected={workspaceView === "sheet"}
+          className={workspaceView === "sheet" ? "selected" : ""}
+          onClick={() => setWorkspaceView("sheet")}
+        >
+          Sheet
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <main className="app">
@@ -1255,7 +1309,7 @@ function App() {
       ) : null}
       <header className="panel header-panel">
         <div className="header-row">
-          <h1>TB-303 Companion</h1>
+          <h1>{isPhoneLandscape ? "TB-303" : "TB-303 Companion"}</h1>
           <div className="header-primary-actions">
             <button className="play-button" onClick={() => setIsPlaying((v) => !v)}>
               {isPlaying ? "Stop" : "Play"}
@@ -1281,8 +1335,13 @@ function App() {
             >
               Delete
             </button>
+            {isPhoneLandscape ? (
+              <button type="button" onClick={() => setMobileProjectOpen((open) => !open)} aria-expanded={mobileProjectOpen}>
+                {projectToggleLabel}
+              </button>
+            ) : null}
           </div>
-          <div className="header-actions">
+          <div className={`header-actions ${isPhoneLandscape && !mobileProjectOpen ? "mobile-collapsed" : ""}`}>
             <label className="header-small">
               Voices
               <select value={lineCount} onChange={(e) => setLineCount(Number(e.currentTarget.value) as 1 | 2 | 3)}>
@@ -1349,7 +1408,23 @@ function App() {
 
       <div className="workspace">
         <section className="panel hardware-panel">
-          <div className="knob-groups">
+          <div className="mobile-hardware-bar">
+            <button
+              type="button"
+              className={`mobile-controls-toggle ${mobileControlsOpen ? "selected" : ""}`}
+              onClick={() => setMobileControlsOpen((open) => !open)}
+              aria-expanded={mobileControlsOpen}
+              aria-controls="mobile-hardware-controls"
+            >
+              {controlsToggleLabel}
+            </button>
+            {renderAuxControls("mobile-aux-controls")}
+          </div>
+
+          <div
+            id="mobile-hardware-controls"
+            className={`knob-groups ${isPhoneLandscape && !mobileControlsOpen ? "mobile-collapsed" : ""}`}
+          >
             <div className="wave-knob-slot">
               <select value={params.waveform} onChange={(e) => updateParams({ waveform: e.currentTarget.value as OscillatorType })}>
                 <option value="sawtooth">Saw</option>
@@ -1408,33 +1483,8 @@ function App() {
               <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
             </div>
 
-            <div className="delay-divider" />
-
-            <div className="aux-controls">
-              {Array.from({ length: lineCount }, (_, i) => (
-                <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
-                  VOICE {i + 1}
-                </button>
-              ))}
-              <div className="view-toggle" role="tablist" aria-label="Workspace view">
-                <button
-                  role="tab"
-                  aria-selected={workspaceView === "editor"}
-                  className={workspaceView === "editor" ? "selected" : ""}
-                  onClick={() => setWorkspaceView("editor")}
-                >
-                  Editor
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={workspaceView === "sheet"}
-                  className={workspaceView === "sheet" ? "selected" : ""}
-                  onClick={() => setWorkspaceView("sheet")}
-                >
-                  Sheet
-                </button>
-              </div>
-            </div>
+            <div className="delay-divider desktop-aux-divider" />
+            {renderAuxControls("desktop-aux-controls")}
           </div>
         </section>
 
