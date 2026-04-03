@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+APP_DIR="${SCRIPT_DIR}"
 ROOT_DIR="$(cd "${APP_DIR}/.." && pwd)"
 PAGES_DIR="${ROOT_DIR}/303util"
 DIST_DIR="${APP_DIR}/dist"
