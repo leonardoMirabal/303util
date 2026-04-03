@@ -89,6 +89,11 @@ button.selected {
   align-items: end;
 }
 
+.top-controls {
+  display: grid;
+  gap: 2px;
+}
+
 .transport label {
   display: grid;
   gap: 2px;
@@ -103,25 +108,44 @@ button.selected {
   flex-wrap: wrap;
 }
 
-.wave-row {
-  margin-top: 3px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.wave-row label {
+.wave-inline {
   display: grid;
   gap: 2px;
-  min-width: 100px;
+  min-width: 84px;
   font-size: 0.62rem;
   color: #edf1f5;
 }
 
-.knob-grid {
+.wave-inline select {
+  min-width: 78px;
+}
+
+.knob-groups {
   margin-top: 3px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px auto;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.knob-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(74px, 1fr));
   gap: 2px;
+}
+
+.main-knobs {
+  grid-template-columns: repeat(7, minmax(60px, 1fr));
+}
+
+.delay-knobs {
+  grid-template-columns: repeat(3, minmax(58px, 1fr));
+}
+
+.delay-divider {
+  width: 1px;
+  background: #8b939f;
+  align-self: stretch;
 }
 
 .knob-control {
@@ -188,15 +212,16 @@ button.selected {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 4px;
 }
 
-.left-column {
+.editor-sheet-row {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
   gap: 4px;
+  align-items: start;
 }
 
 .roll-panel h2,
@@ -205,6 +230,12 @@ button.selected {
   margin: 0 0 2px;
   color: #f6f9fd;
   font-size: 0.86rem;
+}
+
+.roll-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .top-lanes {
@@ -294,14 +325,6 @@ button.selected {
   font-weight: 700;
 }
 
-.step-controls {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  align-items: center;
-  font-size: 0.58rem;
-}
-
 .preview-actions {
   display: flex;
   gap: 4px;
@@ -312,16 +335,14 @@ button.selected {
   background: #d9d9d9;
   border: 1px solid #8d8d8d;
   padding: 2px;
-  flex: 1;
-  min-height: 0;
   width: 100%;
   max-width: none;
 }
 
 .sheet-preview {
   width: 100%;
-  height: 100%;
-  object-fit: contain;
+  height: auto;
+  display: block;
   background: #fff;
   border: 1px solid #222;
 }
@@ -336,6 +357,7 @@ button.selected {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
 .export-canvas {
@@ -343,18 +365,26 @@ button.selected {
 }
 
 @media (max-width: 1120px) {
-  .knob-grid {
-    grid-template-columns: repeat(5, minmax(68px, 1fr));
+  .main-knobs {
+    grid-template-columns: repeat(7, minmax(54px, 1fr));
+  }
+
+  .delay-knobs {
+    grid-template-columns: repeat(3, minmax(52px, 1fr));
   }
 }
 
 @media (max-width: 980px) and (orientation: landscape) {
-  .workspace {
+  .editor-sheet-row {
     grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
   }
 
-  .knob-grid {
-    grid-template-columns: repeat(5, minmax(58px, 1fr));
+  .main-knobs {
+    grid-template-columns: repeat(7, minmax(48px, 1fr));
+  }
+
+  .delay-knobs {
+    grid-template-columns: repeat(3, minmax(46px, 1fr));
   }
 }
 
@@ -369,10 +399,28 @@ button.selected {
   }
 
   .workspace {
+    grid-template-rows: auto 1fr;
+  }
+
+  .editor-sheet-row {
     grid-template-columns: 1fr;
   }
 
-  .knob-grid {
-    grid-template-columns: repeat(3, minmax(64px, 1fr));
+  .knob-groups {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .delay-divider {
+    height: 1px;
+    width: 100%;
+  }
+
+  .main-knobs {
+    grid-template-columns: repeat(4, minmax(52px, 1fr));
+  }
+
+  .delay-knobs {
+    grid-template-columns: repeat(3, minmax(52px, 1fr));
   }
 }

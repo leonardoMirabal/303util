@@ -140,7 +140,6 @@ function App() {
   const [tempo, setTempo] = useState(126);
   const [lines, setLines] = useState<LineState[]>(() => Array.from({ length: MAX_LINES }, () => makeLine()));
   const [selectedLine, setSelectedLine] = useState(0);
-  const [selectedStep, setSelectedStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(-1);
   const [exportPreviewUrl, setExportPreviewUrl] = useState<string | null>(null);
@@ -207,7 +206,6 @@ function App() {
       ),
     );
     setSelectedLine(lineIndex);
-    setSelectedStep(stepIndex);
   };
 
   const setStepMode = (lineIndex: number, stepIndex: number, mode: TimeMode) => {
@@ -227,7 +225,6 @@ function App() {
       ),
     );
     setSelectedLine(lineIndex);
-    setSelectedStep(stepIndex);
   };
 
   const toggleFlag = (lineIndex: number, stepIndex: number, flag: "accent" | "slide") => {
@@ -494,7 +491,6 @@ function App() {
     if (url) setExportPreviewUrl(url);
   }, [lines, patternLength, selectedLine, tempo]);
 
-  const selected = lines[selectedLine].steps[selectedStep];
   const params = lines[selectedLine].params;
 
   return (
@@ -505,8 +501,8 @@ function App() {
       </header>
 
       <div className="workspace">
-        <div className="left-column">
-          <section className="panel hardware-panel">
+        <section className="panel hardware-panel">
+          <div className="top-controls">
             <div className="transport">
               <label>
                 Lines
@@ -525,29 +521,25 @@ function App() {
                   onChange={(e) => setPatternLength(Math.max(4, Math.min(16, Number(e.currentTarget.value))))}
                 />
               </label>
-              <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
-              <button onClick={() => setPlayhead(-1)}>Reset</button>
-            </div>
-
-            <div className="line-tabs">
               {Array.from({ length: lineCount }, (_, i) => (
                 <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
                   LINE {i + 1}
                 </button>
               ))}
-            </div>
-
-            <div className="wave-row">
-              <label>
+              <label className="wave-inline">
                 Wave
                 <select value={params.waveform} onChange={(e) => updateParams({ waveform: e.currentTarget.value as OscillatorType })}>
                   <option value="sawtooth">Saw</option>
                   <option value="square">Square</option>
                 </select>
               </label>
+              <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
+              <button onClick={() => setPlayhead(-1)}>Reset</button>
             </div>
+          </div>
 
-            <div className="knob-grid">
+          <div className="knob-groups">
+            <div className="knob-grid main-knobs">
               <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
               <KnobControl label="Tune" min={-12} max={12} step={1} value={params.tune} onChange={(v) => updateParams({ tune: v })} />
               <KnobControl label="Cutoff" min={180} max={2400} value={params.cutoff} onChange={(v) => updateParams({ cutoff: v })} />
@@ -555,18 +547,25 @@ function App() {
               <KnobControl label="Env Mod" min={0} max={2600} value={params.envMod} onChange={(v) => updateParams({ envMod: v })} />
               <KnobControl label="Decay" min={0.08} max={0.6} step={0.01} value={params.decay} onChange={(v) => updateParams({ decay: v })} format={(v) => v.toFixed(2)} />
               <KnobControl label="Accent" min={1} max={2.5} step={0.05} value={params.accent} onChange={(v) => updateParams({ accent: v })} format={(v) => v.toFixed(2)} />
+            </div>
+
+            <div className="delay-divider" />
+
+            <div className="knob-grid delay-knobs">
               <KnobControl label="Delay Time" min={0.02} max={1} step={0.01} value={params.delayTime} onChange={(v) => updateParams({ delayTime: v })} format={(v) => `${v.toFixed(2)}s`} />
               <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
               <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
             </div>
-          </section>
+          </div>
+        </section>
 
+        <div className="editor-sheet-row">
           <section className="panel roll-panel">
             <h2>Pitch Editor</h2>
             <div className="roll-header">
               <div className="pitch-col">Pitch</div>
               {Array.from({ length: patternLength }, (_, s) => (
-                <button key={s} className={`step-head ${playhead === s ? "playhead" : ""}`} onClick={() => setSelectedStep(s)}>
+                <button key={s} className={`step-head ${playhead === s ? "playhead" : ""}`}>
                   {s + 1}
                 </button>
               ))}
@@ -660,34 +659,24 @@ function App() {
             </div>
           </section>
 
-          <section className="panel step-panel">
-            <h2>Step Detail</h2>
-            <div className="step-controls">
-              <span>Line {selectedLine + 1} / Step {selectedStep + 1}</span>
-              <span>Time: {selected.timeMode.toUpperCase()}</span>
-              <span>Pitch: {selected.timeMode === "note" ? selected.pitch ?? "-" : selected.timeMode === "tie" ? "~" : "REST"}</span>
-              <span>Transpose: {selected.transpose.toUpperCase()}</span>
+          <section className="panel preview-panel">
+            <h2>Visual Pattern Sheet (TB-303 style)</h2>
+            <div className="preview-actions">
+              <button onClick={generateExportPreview}>Refresh</button>
+              <button onClick={savePreviewPng} disabled={!exportPreviewUrl}>
+                Save PNG
+              </button>
             </div>
+            {exportPreviewUrl ? (
+              <div className="sheet-preview-wrap">
+                <img className="sheet-preview" src={exportPreviewUrl} alt="Pattern export preview" />
+              </div>
+            ) : (
+              <p className="preview-help">Preparing preview...</p>
+            )}
+            <canvas className="export-canvas" ref={canvasRef} width={1040} height={300} />
           </section>
         </div>
-
-        <section className="panel preview-panel">
-          <h2>Visual Pattern Sheet (TB-303 style)</h2>
-          <div className="preview-actions">
-            <button onClick={generateExportPreview}>Refresh</button>
-            <button onClick={savePreviewPng} disabled={!exportPreviewUrl}>
-              Save PNG
-            </button>
-          </div>
-          {exportPreviewUrl ? (
-            <div className="sheet-preview-wrap">
-              <img className="sheet-preview" src={exportPreviewUrl} alt="Pattern export preview" />
-            </div>
-          ) : (
-            <p className="preview-help">Preparing preview...</p>
-          )}
-          <canvas className="export-canvas" ref={canvasRef} width={1040} height={300} />
-        </section>
       </div>
     </main>
   );
