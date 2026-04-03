@@ -4,10 +4,23 @@ import "./App.css";
 const STEPS = 16;
 const MAX_LINES = 3;
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
+const DELAY_SUBDIVISIONS = [
+  { value: "1/4", label: "1/4", beats: 1 },
+  { value: "1/4.", label: "1/4.", beats: 1.5 },
+  { value: "1/8", label: "1/8", beats: 0.5 },
+  { value: "1/8.", label: "1/8.", beats: 0.75 },
+  { value: "1/8T", label: "1/8T", beats: 1 / 3 },
+  { value: "1/16", label: "1/16", beats: 0.25 },
+  { value: "1/16.", label: "1/16.", beats: 0.375 },
+  { value: "1/16T", label: "1/16T", beats: 1 / 6 },
+  { value: "1/32", label: "1/32", beats: 0.125 },
+  { value: "1/32.", label: "1/32.", beats: 0.1875 },
+] as const;
 
 type PitchName = (typeof PITCHES)[number];
 type TimeMode = "note" | "tie" | "rest";
 type Transpose = "none" | "down" | "up";
+type DelaySubdivision = (typeof DELAY_SUBDIVISIONS)[number]["value"];
 
 type Step = {
   pitch: PitchName | null;
@@ -27,6 +40,8 @@ type VoiceParams = {
   accent: number;
   volume: number;
   delayTime: number;
+  delaySync: boolean;
+  delaySubdivision: DelaySubdivision;
   delayFeedback: number;
   delayMix: number;
   distortion: number;
@@ -57,7 +72,7 @@ type LineFx = {
 type ProjectData = {
   version: 1;
   programName: string;
-  lineCount: 2 | 3;
+  lineCount: 1 | 2 | 3;
   patternLength: number;
   tempo: number;
   selectedLine: number;
@@ -74,6 +89,8 @@ const defaultParams = (): VoiceParams => ({
   accent: 1.45,
   volume: 0.26,
   delayTime: 0.24,
+  delaySync: true,
+  delaySubdivision: "1/8",
   delayFeedback: 0.32,
   delayMix: 0.26,
   distortion: 0.12,
@@ -112,7 +129,7 @@ const defaultProjectLines = (): LineState[] => {
 };
 
 const resetProjectState = () => ({
-  lineCount: 2 as 2 | 3,
+  lineCount: 1 as 1 | 2 | 3,
   patternLength: 8,
   tempo: 126,
   programName: "Program",
@@ -178,9 +195,10 @@ type KnobProps = {
   value: number;
   onChange: (v: number) => void;
   format?: (v: number) => string;
+  disabled?: boolean;
 };
 
-function KnobControl({ label, min, max, step = 1, value, onChange, format }: KnobProps) {
+function KnobControl({ label, min, max, step = 1, value, onChange, format, disabled = false }: KnobProps) {
   const normalized = (value - min) / (max - min);
   const angle = -135 + normalized * 270;
   const style: React.CSSProperties & { "--angle": string } = { "--angle": `${angle}deg` };
@@ -196,6 +214,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format }: Kno
           max={max}
           step={step}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(Number(e.currentTarget.value))}
         />
       </div>
@@ -203,6 +222,14 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format }: Kno
     </label>
   );
 }
+
+const isDelaySubdivision = (value: unknown): value is DelaySubdivision =>
+  typeof value === "string" && DELAY_SUBDIVISIONS.some((subdivision) => subdivision.value === value);
+
+const delayTimeFromTempo = (tempo: number, subdivision: DelaySubdivision): number => {
+  const beats = DELAY_SUBDIVISIONS.find((entry) => entry.value === subdivision)?.beats ?? 0.5;
+  return (60 / tempo) * beats;
+};
 
 const findBaseStep = (steps: Step[], step: number): number | null => {
   if (steps[step].timeMode === "note" && steps[step].pitch) return step;
@@ -215,7 +242,7 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
 };
 
 function App() {
-  const [lineCount, setLineCount] = useState<2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
+  const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [patternLength, setPatternLength] = useState(DEFAULT_PROJECT_STATE.patternLength);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
@@ -442,7 +469,8 @@ function App() {
     filter.connect(amp);
     amp.connect(fx.send);
 
-    fx.delay.delayTime.setValueAtTime(Math.min(1, Math.max(0.02, line.params.delayTime)), now);
+    const delayTime = line.params.delaySync ? delayTimeFromTempo(tempo, line.params.delaySubdivision) : line.params.delayTime;
+    fx.delay.delayTime.setValueAtTime(Math.min(1, Math.max(0.02, delayTime)), now);
     fx.feedback.gain.setValueAtTime(Math.min(0.92, Math.max(0, line.params.delayFeedback)), now);
     fx.dry.gain.setValueAtTime(1, now);
     fx.delaySend.gain.setValueAtTime(Math.min(1, Math.max(0, line.params.delayMix)), now);
@@ -471,6 +499,9 @@ function App() {
   useEffect(() => {
     patternLengthRef.current = patternLength;
   }, [patternLength]);
+  useEffect(() => {
+    setSelectedLine((prev) => Math.min(prev, lineCount - 1));
+  }, [lineCount]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -653,7 +684,7 @@ function App() {
     const data = raw as Record<string, unknown>;
     if (data.version !== 1) throw new Error("Unsupported JSON version.");
     if (typeof data.programName !== "string") throw new Error("programName must be a string.");
-    if (data.lineCount !== 2 && data.lineCount !== 3) throw new Error("lineCount must be 2 or 3.");
+    if (data.lineCount !== 1 && data.lineCount !== 2 && data.lineCount !== 3) throw new Error("voiceCount must be 1, 2, or 3.");
     if (typeof data.patternLength !== "number" || !Number.isFinite(data.patternLength) || data.patternLength < 4 || data.patternLength > 16) {
       throw new Error("patternLength must be a number between 4 and 16.");
     }
@@ -680,6 +711,8 @@ function App() {
         accent: Number(paramsRaw.accent),
         volume: Number(paramsRaw.volume),
         delayTime: Number(paramsRaw.delayTime),
+        delaySync: typeof paramsRaw.delaySync === "boolean" ? paramsRaw.delaySync : false,
+        delaySubdivision: isDelaySubdivision(paramsRaw.delaySubdivision) ? paramsRaw.delaySubdivision : "1/8",
         delayFeedback: Number(paramsRaw.delayFeedback),
         delayMix: Number(paramsRaw.delayMix),
         distortion: typeof paramsRaw.distortion === "number" ? Number(paramsRaw.distortion) : 0,
@@ -780,8 +813,9 @@ function App() {
           <h1>TB-303 Companion</h1>
           <div className="header-actions">
             <label className="header-small">
-              Lines
-              <select value={lineCount} onChange={(e) => setLineCount(Number(e.currentTarget.value) as 2 | 3)}>
+              Voices
+              <select value={lineCount} onChange={(e) => setLineCount(Number(e.currentTarget.value) as 1 | 2 | 3)}>
+                <option value={1}>1</option>
                 <option value={2}>2</option>
                 <option value={3}>3</option>
               </select>
@@ -834,7 +868,36 @@ function App() {
             <div className="delay-divider" />
 
             <div className="knob-grid fx-knobs">
-              <KnobControl label="Delay Time" min={0.02} max={1} step={0.01} value={params.delayTime} onChange={(v) => updateParams({ delayTime: v })} format={(v) => `${v.toFixed(2)}s`} />
+              <KnobControl
+                label="Delay Time"
+                min={0.02}
+                max={1}
+                step={0.01}
+                value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+                disabled={params.delaySync}
+                onChange={(v) => updateParams({ delayTime: v })}
+                format={(v) => `${v.toFixed(2)}s`}
+              />
+              <label className="knob-control delay-sync-control">
+                <span className="knob-label">Delay Sync</span>
+                <button
+                  className={params.delaySync ? "selected" : ""}
+                  onClick={() => updateParams({ delaySync: !params.delaySync })}
+                >
+                  {params.delaySync ? "SYNC" : "FREE"}
+                </button>
+                <select
+                  value={params.delaySubdivision}
+                  disabled={!params.delaySync}
+                  onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                >
+                  {DELAY_SUBDIVISIONS.map((subdivision) => (
+                    <option key={subdivision.value} value={subdivision.value}>
+                      {subdivision.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
               <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
               <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
@@ -847,7 +910,7 @@ function App() {
             <div className="aux-controls">
               {Array.from({ length: lineCount }, (_, i) => (
                 <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
-                  LINE {i + 1}
+                  VOICE {i + 1}
                 </button>
               ))}
               <div className="view-toggle" role="tablist" aria-label="Workspace view">

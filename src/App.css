@@ -164,7 +164,7 @@ button.selected {
 }
 
 .fx-knobs {
-  grid-template-columns: repeat(6, 58px);
+  grid-template-columns: repeat(7, 58px);
 }
 
 .wave-knob-slot {
@@ -201,6 +201,19 @@ button.selected {
   display: grid;
   justify-items: center;
   gap: 1px;
+}
+
+.delay-sync-control {
+  gap: 4px;
+  min-width: 58px;
+}
+
+.delay-sync-control button,
+.delay-sync-control select {
+  width: 58px;
+  height: 24px;
+  padding: 0 4px;
+  font-size: 0.66rem;
 }
 
 .knob-label {
@@ -451,7 +464,7 @@ button.selected {
   }
 
   .fx-knobs {
-    grid-template-columns: repeat(6, 52px);
+    grid-template-columns: repeat(7, 52px);
   }
 }
 
@@ -465,7 +478,7 @@ button.selected {
   }
 
   .fx-knobs {
-    grid-template-columns: repeat(6, 46px);
+    grid-template-columns: repeat(7, 46px);
   }
 }
 
