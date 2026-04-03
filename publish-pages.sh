@@ -3,10 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${SCRIPT_DIR}"
+ROOT_DIR="$(cd "${APP_DIR}/.." && pwd)"
+PAGES_DIR="${ROOT_DIR}/303util"
 DIST_DIR="${APP_DIR}/dist"
 
-if [ ! -d "${APP_DIR}/.git" ]; then
-  echo "Error: ${APP_DIR} is not a git repository."
+if [ ! -d "${PAGES_DIR}/.git" ]; then
+  echo "Error: ${PAGES_DIR} is not a git repository."
   exit 1
 fi
 
@@ -14,14 +16,11 @@ echo "Building web app..."
 cd "${APP_DIR}"
 npm run build
 
-echo "Syncing dist -> publish files in repo root..."
-cp "${DIST_DIR}/index.html" "${APP_DIR}/index.html"
-if [ -f "${DIST_DIR}/tauri.svg" ]; then cp "${DIST_DIR}/tauri.svg" "${APP_DIR}/tauri.svg"; fi
-if [ -f "${DIST_DIR}/vite.svg" ]; then cp "${DIST_DIR}/vite.svg" "${APP_DIR}/vite.svg"; fi
-rm -rf "${APP_DIR}/assets"
-mkdir -p "${APP_DIR}/assets"
-cp -R "${DIST_DIR}/assets/." "${APP_DIR}/assets/"
+echo "Syncing dist -> 303util root..."
+mkdir -p "${PAGES_DIR}"
+find "${PAGES_DIR}" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+cp -R "${DIST_DIR}/." "${PAGES_DIR}/"
 
 echo "Done. Next:"
-echo "  cd ${APP_DIR}"
+echo "  cd ${PAGES_DIR}"
 echo "  git add -A && git commit -m \"Publish built site\" && git push"
