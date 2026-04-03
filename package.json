@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "publish:pages": "bash ./scripts/publish-pages.sh",
     "preview": "vite preview",
     "tauri": "tauri"
   },
