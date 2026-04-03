@@ -48,22 +48,23 @@ body {
 
 .header-row {
   display: flex;
-  align-items: end;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
 
 .header-actions {
   margin-left: auto;
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .header-actions label {
-  display: grid;
-  gap: 2px;
-  font-size: 0.64rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
   color: #ecf0f4;
 }
 
@@ -144,12 +145,12 @@ button.selected {
 }
 
 .knob-groups {
-  margin-top: 3px;
+  margin-top: 1px;
   display: grid;
   grid-template-columns: auto 1px auto 1px auto 1px auto;
   justify-content: start;
-  gap: 18px;
-  align-items: start;
+  gap: 10px;
+  align-items: center;
 }
 
 .knob-grid {
@@ -168,24 +169,32 @@ button.selected {
 
 .wave-knob-slot {
   display: flex;
-  align-items: start;
+  align-items: center;
 }
 
 .wave-knob-slot select {
-  min-width: 96px;
+  min-width: 92px;
+  height: 32px;
 }
 
 .aux-controls {
   display: flex;
-  align-items: start;
+  align-items: center;
   gap: 4px;
-  margin-left: 2px;
+  margin-left: 0;
+}
+
+.aux-controls button,
+.view-toggle button {
+  height: 32px;
+  padding: 0 9px;
 }
 
 .delay-divider {
   width: 1px;
   background: #8b939f;
   align-self: stretch;
+  min-height: 44px;
 }
 
 .knob-control {
