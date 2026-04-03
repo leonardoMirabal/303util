@@ -748,17 +748,22 @@ function App() {
     }
   };
 
-  const resetToDefaultPattern = () => {
-    const defaults = resetProjectState();
+  const resetPattern = () => {
     setIsPlaying(false);
     setPlayhead(-1);
     stepRef.current = 0;
-    setProgramName(defaults.programName);
-    setLineCount(defaults.lineCount);
-    setPatternLength(defaults.patternLength);
-    setTempo(defaults.tempo);
-    setSelectedLine(defaults.selectedLine);
-    setLines(defaults.lines);
+    setLines((prev) =>
+      prev.map((line) => ({
+        ...line,
+        steps: Array.from({ length: STEPS }, () => ({
+          pitch: null,
+          timeMode: "rest",
+          accent: false,
+          slide: false,
+          transpose: "none" as const,
+        })),
+      })),
+    );
   };
 
   useEffect(() => {
@@ -796,9 +801,9 @@ function App() {
               <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
             </label>
             <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
-            <button onClick={resetToDefaultPattern}>Reset</button>
-            <button onClick={exportProjectJson}>Export JSON</button>
-            <button onClick={() => importRef.current?.click()}>Import JSON</button>
+            <button onClick={resetPattern}>Reset</button>
+            <button onClick={exportProjectJson}>Export</button>
+            <button onClick={() => importRef.current?.click()}>Import</button>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
           </div>
         </div>
