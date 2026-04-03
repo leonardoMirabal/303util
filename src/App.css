@@ -125,26 +125,6 @@ button.selected {
 .view-toggle {
   display: inline-flex;
   gap: 3px;
-  margin-left: auto;
-}
-
-.top-controls {
-  display: grid;
-  gap: 2px;
-}
-
-.transport label {
-  display: grid;
-  gap: 2px;
-  font-size: 0.64rem;
-  color: #ecf0f4;
-}
-
-.line-tabs {
-  margin-top: 4px;
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
 }
 
 .wave-inline {
@@ -166,10 +146,10 @@ button.selected {
 .knob-groups {
   margin-top: 3px;
   display: grid;
-  grid-template-columns: auto 1px auto;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: stretch;
+  grid-template-columns: auto 1px auto 1px auto 1px auto;
+  justify-content: start;
+  gap: 18px;
+  align-items: start;
 }
 
 .knob-grid {
@@ -182,8 +162,24 @@ button.selected {
   grid-template-columns: repeat(7, 60px);
 }
 
-.delay-knobs {
-  grid-template-columns: repeat(3, 58px);
+.fx-knobs {
+  grid-template-columns: repeat(6, 58px);
+}
+
+.wave-knob-slot {
+  display: flex;
+  align-items: start;
+}
+
+.wave-knob-slot select {
+  min-width: 96px;
+}
+
+.aux-controls {
+  display: flex;
+  align-items: start;
+  gap: 4px;
+  margin-left: 2px;
 }
 
 .delay-divider {
@@ -243,14 +239,7 @@ button.selected {
 }
 
 .knob-value {
-  min-width: 34px;
-  text-align: center;
-  padding: 1px 3px;
-  border: 1px solid #1e2226;
-  border-radius: 4px;
-  background: #15181b;
-  color: #e8edf2;
-  font-size: 0.52rem;
+  display: none;
 }
 
 .workspace {
@@ -452,8 +441,8 @@ button.selected {
     grid-template-columns: repeat(7, 54px);
   }
 
-  .delay-knobs {
-    grid-template-columns: repeat(3, 52px);
+  .fx-knobs {
+    grid-template-columns: repeat(6, 52px);
   }
 }
 
@@ -466,8 +455,8 @@ button.selected {
     grid-template-columns: repeat(7, 48px);
   }
 
-  .delay-knobs {
-    grid-template-columns: repeat(3, 46px);
+  .fx-knobs {
+    grid-template-columns: repeat(6, 46px);
   }
 }
 
@@ -503,7 +492,11 @@ button.selected {
     grid-template-columns: repeat(4, minmax(52px, 1fr));
   }
 
-  .delay-knobs {
+  .fx-knobs {
     grid-template-columns: repeat(3, minmax(52px, 1fr));
+  }
+
+  .aux-controls {
+    flex-wrap: wrap;
   }
 }

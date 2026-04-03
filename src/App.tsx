@@ -29,6 +29,8 @@ type VoiceParams = {
   delayTime: number;
   delayFeedback: number;
   delayMix: number;
+  distortion: number;
+  reverb: number;
 };
 
 type LineState = {
@@ -39,9 +41,17 @@ type LineState = {
 type LineFx = {
   send: GainNode;
   dry: GainNode;
-  wet: GainNode;
+  delaySend: GainNode;
+  delayWet: GainNode;
   delay: DelayNode;
   feedback: GainNode;
+  distSend: GainNode;
+  distortion: WaveShaperNode;
+  distWet: GainNode;
+  reverbSend: GainNode;
+  reverb: ConvolverNode;
+  reverbWet: GainNode;
+  lastDistortionAmount: number;
 };
 
 type ProjectData = {
@@ -66,6 +76,8 @@ const defaultParams = (): VoiceParams => ({
   delayTime: 0.24,
   delayFeedback: 0.32,
   delayMix: 0.26,
+  distortion: 0.12,
+  reverb: 0.16,
 });
 
 const makeLine = (): LineState => ({
@@ -78,6 +90,26 @@ const makeLine = (): LineState => ({
   })),
   params: defaultParams(),
 });
+
+const defaultProjectLines = (): LineState[] => {
+  const lines = Array.from({ length: MAX_LINES }, () => makeLine());
+  lines[0] = {
+    ...lines[0],
+    steps: [
+      { pitch: "C3", timeMode: "note", accent: true, slide: false, transpose: "down" },
+      { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
+      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
+      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
+      { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
+      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
+      { pitch: "D#3", timeMode: "note", accent: false, slide: true, transpose: "none" },
+      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
+      ...Array.from({ length: 8 }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
+    ],
+    params: { ...defaultParams(), resonance: 6.4, envMod: 59 },
+  };
+  return lines;
+};
 
 const noteToFrequency = (note: PitchName): number => {
   const match = note.match(/^([A-G])(#|b)?(\d)$/);
@@ -96,6 +128,31 @@ const transposeNote = (freq: number, mode: Transpose) => {
   if (mode === "down") return freq / 2;
   if (mode === "up") return freq * 2;
   return freq;
+};
+
+const makeDistortionCurve = (amount: number) => {
+  const samples = 256;
+  const curve = new Float32Array(samples);
+  const k = 1 + amount * 80;
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i * 2) / (samples - 1) - 1;
+    curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
+  }
+  return curve;
+};
+
+const makeImpulseResponse = (ctx: AudioContext) => {
+  const duration = 1.2;
+  const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const data = impulse.getChannelData(channel);
+    for (let i = 0; i < length; i += 1) {
+      const decay = (1 - i / length) ** 2.2;
+      data[i] = (Math.random() * 2 - 1) * decay;
+    }
+  }
+  return impulse;
 };
 
 const isPitchName = (value: unknown): value is PitchName => typeof value === "string" && (PITCHES as readonly string[]).includes(value);
@@ -148,11 +205,11 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
 
 function App() {
   const [lineCount, setLineCount] = useState<2 | 3>(2);
-  const [patternLength, setPatternLength] = useState(16);
+  const [patternLength, setPatternLength] = useState(8);
   const [tempo, setTempo] = useState(126);
   const [programName, setProgramName] = useState("Program");
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
-  const [lines, setLines] = useState<LineState[]>(() => Array.from({ length: MAX_LINES }, () => makeLine()));
+  const [lines, setLines] = useState<LineState[]>(() => defaultProjectLines());
   const [selectedLine, setSelectedLine] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(-1);
@@ -186,19 +243,54 @@ function App() {
       if (!ctx || !master) return null;
       const send = ctx.createGain();
       const dry = ctx.createGain();
-      const wet = ctx.createGain();
+      const delaySend = ctx.createGain();
+      const delayWet = ctx.createGain();
       const delay = ctx.createDelay(1.0);
       const feedback = ctx.createGain();
+      const distSend = ctx.createGain();
+      const distortion = ctx.createWaveShaper();
+      const distWet = ctx.createGain();
+      const reverbSend = ctx.createGain();
+      const reverb = ctx.createConvolver();
+      const reverbWet = ctx.createGain();
 
       send.connect(dry);
       dry.connect(master);
-      send.connect(delay);
+      send.connect(delaySend);
+      delaySend.connect(delay);
       delay.connect(feedback);
       feedback.connect(delay);
-      delay.connect(wet);
-      wet.connect(master);
+      delay.connect(delayWet);
+      delayWet.connect(master);
 
-      lineFxRef.current[lineIndex] = { send, dry, wet, delay, feedback };
+      send.connect(distSend);
+      distSend.connect(distortion);
+      distortion.connect(distWet);
+      distWet.connect(master);
+
+      send.connect(reverbSend);
+      reverbSend.connect(reverb);
+      reverb.connect(reverbWet);
+      reverbWet.connect(master);
+
+      distortion.oversample = "4x";
+      reverb.buffer = makeImpulseResponse(ctx);
+
+      lineFxRef.current[lineIndex] = {
+        send,
+        dry,
+        delaySend,
+        delayWet,
+        delay,
+        feedback,
+        distSend,
+        distortion,
+        distWet,
+        reverbSend,
+        reverb,
+        reverbWet,
+        lastDistortionAmount: -1,
+      };
     }
     return { ctx: audioRef.current };
   };
@@ -341,8 +433,19 @@ function App() {
 
     fx.delay.delayTime.setValueAtTime(Math.min(1, Math.max(0.02, line.params.delayTime)), now);
     fx.feedback.gain.setValueAtTime(Math.min(0.92, Math.max(0, line.params.delayFeedback)), now);
-    fx.dry.gain.setValueAtTime(1 - line.params.delayMix, now);
-    fx.wet.gain.setValueAtTime(line.params.delayMix, now);
+    fx.dry.gain.setValueAtTime(1, now);
+    fx.delaySend.gain.setValueAtTime(Math.min(1, Math.max(0, line.params.delayMix)), now);
+    fx.delayWet.gain.setValueAtTime(Math.min(1, Math.max(0, line.params.delayMix)), now);
+    const distortionAmount = Math.min(1, Math.max(0, line.params.distortion));
+    fx.distSend.gain.setValueAtTime(distortionAmount, now);
+    fx.distWet.gain.setValueAtTime(distortionAmount, now);
+    if (Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
+      fx.distortion.curve = makeDistortionCurve(distortionAmount);
+      fx.lastDistortionAmount = distortionAmount;
+    }
+    const reverbAmount = Math.min(1, Math.max(0, line.params.reverb));
+    fx.reverbSend.gain.setValueAtTime(reverbAmount, now);
+    fx.reverbWet.gain.setValueAtTime(reverbAmount, now);
 
     osc.start(now);
     osc.stop(now + gate + 0.08);
@@ -568,6 +671,8 @@ function App() {
         delayTime: Number(paramsRaw.delayTime),
         delayFeedback: Number(paramsRaw.delayFeedback),
         delayMix: Number(paramsRaw.delayMix),
+        distortion: typeof paramsRaw.distortion === "number" ? Number(paramsRaw.distortion) : 0,
+        reverb: typeof paramsRaw.reverb === "number" ? Number(paramsRaw.reverb) : 0,
       };
       if (Object.values(params).some((v) => (typeof v === "number" ? !Number.isFinite(v) : false))) {
         throw new Error(`Line ${lineIndex + 1} params contain invalid numbers.`);
@@ -677,20 +782,45 @@ function App() {
 
       <div className="workspace">
         <section className="panel hardware-panel">
-          <div className="top-controls">
-            <div className="transport">
+          <div className="knob-groups">
+            <div className="wave-knob-slot">
+              <select value={params.waveform} onChange={(e) => updateParams({ waveform: e.currentTarget.value as OscillatorType })}>
+                <option value="sawtooth">Saw</option>
+                <option value="square">Square</option>
+              </select>
+            </div>
+
+            <div className="delay-divider" />
+
+            <div className="knob-grid main-knobs">
+              <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
+              <KnobControl label="Tune" min={-12} max={12} step={1} value={params.tune} onChange={(v) => updateParams({ tune: v })} />
+              <KnobControl label="Cutoff" min={180} max={2400} value={params.cutoff} onChange={(v) => updateParams({ cutoff: v })} />
+              <KnobControl label="Resonance" min={0} max={22} step={0.2} value={params.resonance} onChange={(v) => updateParams({ resonance: v })} />
+              <KnobControl label="Env Mod" min={0} max={2600} value={params.envMod} onChange={(v) => updateParams({ envMod: v })} />
+              <KnobControl label="Decay" min={0.08} max={0.6} step={0.01} value={params.decay} onChange={(v) => updateParams({ decay: v })} format={(v) => v.toFixed(2)} />
+              <KnobControl label="Accent" min={1} max={2.5} step={0.05} value={params.accent} onChange={(v) => updateParams({ accent: v })} format={(v) => v.toFixed(2)} />
+            </div>
+
+            <div className="delay-divider" />
+
+            <div className="knob-grid fx-knobs">
+              <KnobControl label="Delay Time" min={0.02} max={1} step={0.01} value={params.delayTime} onChange={(v) => updateParams({ delayTime: v })} format={(v) => `${v.toFixed(2)}s`} />
+              <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
+              <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
+              <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
+              <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+              <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
+            </div>
+
+            <div className="delay-divider" />
+
+            <div className="aux-controls">
               {Array.from({ length: lineCount }, (_, i) => (
                 <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
                   LINE {i + 1}
                 </button>
               ))}
-              <label className="wave-inline">
-                Wave
-                <select value={params.waveform} onChange={(e) => updateParams({ waveform: e.currentTarget.value as OscillatorType })}>
-                  <option value="sawtooth">Saw</option>
-                  <option value="square">Square</option>
-                </select>
-              </label>
               <div className="view-toggle" role="tablist" aria-label="Workspace view">
                 <button
                   role="tab"
@@ -709,26 +839,6 @@ function App() {
                   Sheet
                 </button>
               </div>
-            </div>
-          </div>
-
-          <div className="knob-groups">
-            <div className="knob-grid main-knobs">
-              <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
-              <KnobControl label="Tune" min={-12} max={12} step={1} value={params.tune} onChange={(v) => updateParams({ tune: v })} />
-              <KnobControl label="Cutoff" min={180} max={2400} value={params.cutoff} onChange={(v) => updateParams({ cutoff: v })} />
-              <KnobControl label="Resonance" min={0} max={22} step={0.2} value={params.resonance} onChange={(v) => updateParams({ resonance: v })} />
-              <KnobControl label="Env Mod" min={0} max={2600} value={params.envMod} onChange={(v) => updateParams({ envMod: v })} />
-              <KnobControl label="Decay" min={0.08} max={0.6} step={0.01} value={params.decay} onChange={(v) => updateParams({ decay: v })} format={(v) => v.toFixed(2)} />
-              <KnobControl label="Accent" min={1} max={2.5} step={0.05} value={params.accent} onChange={(v) => updateParams({ accent: v })} format={(v) => v.toFixed(2)} />
-            </div>
-
-            <div className="delay-divider" />
-
-            <div className="knob-grid delay-knobs">
-              <KnobControl label="Delay Time" min={0.02} max={1} step={0.01} value={params.delayTime} onChange={(v) => updateParams({ delayTime: v })} format={(v) => `${v.toFixed(2)}s`} />
-              <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
-              <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
             </div>
           </div>
         </section>
