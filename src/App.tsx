@@ -1660,10 +1660,8 @@ function App() {
     const syncLandscapeState = () => {
       const isLandscapePhone = mediaQuery.matches;
       setIsPhoneLandscape(isLandscapePhone);
-      if (!isLandscapePhone) {
-        setMobileControlsOpen(true);
-        setMobileProjectOpen(true);
-      }
+      setMobileProjectOpen(!isLandscapePhone);
+      if (!isLandscapePhone) setMobileControlsOpen(true);
     };
     syncLandscapeState();
     mediaQuery.addEventListener("change", syncLandscapeState);
@@ -1794,11 +1792,6 @@ function App() {
             >
               Delete
             </button>
-            {isPhoneLandscape ? (
-              <button type="button" onClick={() => setMobileProjectOpen((open) => !open)} aria-expanded={mobileProjectOpen}>
-                {projectToggleLabel}
-              </button>
-            ) : null}
           </div>
           <div className={`header-actions ${isPhoneLandscape && !mobileProjectOpen ? "mobile-collapsed" : ""}`}>
             <label className="header-small">
@@ -1888,6 +1881,14 @@ function App() {
                 Exit Full
               </button>
             ) : null}
+            <button
+              type="button"
+              className="mobile-project-toggle"
+              onClick={() => setMobileProjectOpen((open) => !open)}
+              aria-expanded={mobileProjectOpen}
+            >
+              {projectToggleLabel}
+            </button>
             {renderAuxControls("mobile-aux-controls")}
           </div>
 

@@ -218,6 +218,7 @@ button.selected {
 .mobile-hardware-bar,
 .mobile-controls-toggle,
 .mobile-fullscreen-toggle,
+.mobile-project-toggle,
 .mobile-aux-controls {
   display: none;
 }
@@ -607,6 +608,16 @@ button.selected {
     white-space: nowrap;
   }
 
+  .mobile-project-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.66rem;
+    white-space: nowrap;
+  }
+
   .desktop-aux-controls,
   .desktop-aux-divider {
     display: none;
@@ -643,6 +654,9 @@ button.selected {
   .header-primary-actions {
     flex-wrap: nowrap;
     min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: 1px;
   }
 
   .header-actions {
@@ -654,6 +668,10 @@ button.selected {
   }
 
   .header-actions.mobile-collapsed {
+    display: none;
+  }
+
+  .header-actions .google-sync-status {
     display: none;
   }
 
