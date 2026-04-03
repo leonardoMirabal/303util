@@ -209,7 +209,7 @@ const makeImpulseResponse = (ctx: AudioContext) => {
 
 const isPitchName = (value: unknown): value is PitchName => typeof value === "string" && (PITCHES as readonly string[]).includes(value);
 
-const shortNote = (pitch: PitchName | null): string => (pitch ? pitch.replace("#", "+") : "-");
+const shortNote = (pitch: PitchName | null): string => (pitch ? pitch : "-");
 
 type KnobProps = {
   label: string;
