@@ -211,6 +211,7 @@ button.selected {
 
 .mobile-hardware-bar,
 .mobile-controls-toggle,
+.mobile-fullscreen-toggle,
 .mobile-aux-controls {
   display: none;
 }
@@ -581,6 +582,16 @@ button.selected {
   }
 
   .mobile-controls-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 0.66rem;
+    white-space: nowrap;
+  }
+
+  .mobile-fullscreen-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;

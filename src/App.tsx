@@ -96,6 +96,15 @@ type PatternRecord = {
   updatedAt: number;
 };
 
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
 const DB_NAME = "tb303-local-db";
 const DB_VERSION = 1;
 const LIBRARIES_STORE = "libraries";
@@ -329,6 +338,7 @@ function App() {
   const [mobileProjectOpen, setMobileProjectOpen] = useState(
     () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches),
   );
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1263,6 +1273,20 @@ function App() {
     return () => mediaQuery.removeEventListener("change", syncLandscapeState);
   }, []);
 
+  useEffect(() => {
+    const fullDoc = document as FullscreenDocument;
+    const syncFullscreenState = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement || fullDoc.webkitFullscreenElement));
+    };
+    syncFullscreenState();
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreenState as EventListener);
+    };
+  }, []);
+
   const params = lines[selectedLine].params;
   const patternLength = lines[selectedLine].patternLength;
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
@@ -1271,6 +1295,44 @@ function App() {
     window.matchMedia("(max-width: 860px) and (orientation: portrait)").matches;
   const controlsToggleLabel = mobileControlsOpen ? "Hide Controls" : "Controls";
   const projectToggleLabel = mobileProjectOpen ? "Hide Project" : "Project";
+  const enterFullscreen = () => {
+    const fullDoc = document as FullscreenDocument;
+    const fullElement = document.documentElement as FullscreenElement;
+    const currentFullscreenElement = document.fullscreenElement || fullDoc.webkitFullscreenElement;
+
+    if (currentFullscreenElement) {
+      return;
+    }
+
+    if (fullElement.requestFullscreen) {
+      void fullElement.requestFullscreen();
+      return;
+    }
+    if (fullElement.webkitRequestFullscreen) {
+      void fullElement.webkitRequestFullscreen();
+      return;
+    }
+    window.alert("Fullscreen is not supported in this browser.");
+  };
+
+  const exitFullscreen = () => {
+    const fullDoc = document as FullscreenDocument;
+    const currentFullscreenElement = document.fullscreenElement || fullDoc.webkitFullscreenElement;
+
+    if (!currentFullscreenElement) {
+      return;
+    }
+
+    if (document.exitFullscreen) {
+      void document.exitFullscreen();
+      return;
+    }
+    if (fullDoc.webkitExitFullscreen) {
+      void fullDoc.webkitExitFullscreen();
+      return;
+    }
+    window.alert("Fullscreen exit is not supported in this browser.");
+  };
 
   const renderAuxControls = (extraClassName?: string) => (
     <div className={extraClassName ? `aux-controls ${extraClassName}` : "aux-controls"}>
@@ -1418,6 +1480,14 @@ function App() {
             >
               {controlsToggleLabel}
             </button>
+            <button type="button" className="mobile-fullscreen-toggle" onClick={enterFullscreen} disabled={isFullscreen}>
+              Full
+            </button>
+            {isFullscreen ? (
+              <button type="button" className="mobile-fullscreen-toggle" onClick={exitFullscreen}>
+                Exit Full
+              </button>
+            ) : null}
             {renderAuxControls("mobile-aux-controls")}
           </div>
 
