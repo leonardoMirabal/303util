@@ -6,7 +6,25 @@ APP_DIR="${SCRIPT_DIR}"
 ROOT_DIR="$(cd "${APP_DIR}/.." && pwd)"
 PAGES_DIR="${ROOT_DIR}/303util"
 DIST_DIR="${APP_DIR}/dist"
-REPO_NAME="303util"
+
+write_source_index() {
+  cat > "${APP_DIR}/index.html" <<'EOF'
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>303 util</title>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+EOF
+}
 
 if [ ! -d "${PAGES_DIR}/.git" ]; then
   echo "Error: ${PAGES_DIR} is not a git repository."
@@ -15,6 +33,7 @@ fi
 
 echo "Building web app..."
 cd "${APP_DIR}"
+write_source_index
 GH_PAGES=true npm run build
 
 echo "Syncing dist -> 303util root (safe mode)..."
