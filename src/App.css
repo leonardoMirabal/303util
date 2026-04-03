@@ -444,6 +444,43 @@ button.selected {
   gap: 2px;
 }
 
+.library-browser {
+  margin-bottom: 4px;
+  border: 1px solid #2b3037;
+  border-radius: 6px;
+  padding: 4px;
+  background: #2a2f36;
+}
+
+.library-browser h2 {
+  margin: 0 0 4px;
+  font-size: 0.74rem;
+}
+
+.library-list {
+  display: grid;
+  gap: 3px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.library-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: #1c2025;
+  border: 1px solid #252a31;
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-size: 0.7rem;
+}
+
+.library-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
 .preview-panel .sheet-preview-wrap {
   flex: 1;
   min-height: 0;

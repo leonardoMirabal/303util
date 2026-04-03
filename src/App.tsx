@@ -49,6 +49,7 @@ type VoiceParams = {
 };
 
 type LineState = {
+  patternLength: number;
   steps: Step[];
   params: VoiceParams;
 };
@@ -73,11 +74,32 @@ type ProjectData = {
   version: 1;
   programName: string;
   lineCount: 1 | 2 | 3;
-  patternLength: number;
+  patternLength?: number;
   tempo: number;
   selectedLine: number;
   lines: LineState[];
 };
+
+type LibraryRecord = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type PatternRecord = {
+  id: string;
+  libraryId: string;
+  name: string;
+  project: ProjectData;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const DB_NAME = "tb303-local-db";
+const DB_VERSION = 1;
+const LIBRARIES_STORE = "libraries";
+const PATTERNS_STORE = "patterns";
 
 const defaultParams = (): VoiceParams => ({
   waveform: "sawtooth",
@@ -98,6 +120,7 @@ const defaultParams = (): VoiceParams => ({
 });
 
 const makeLine = (): LineState => ({
+  patternLength: 8,
   steps: Array.from({ length: STEPS }, () => ({
     pitch: null,
     timeMode: "rest",
@@ -130,7 +153,6 @@ const defaultProjectLines = (): LineState[] => {
 
 const resetProjectState = () => ({
   lineCount: 1 as 1 | 2 | 3,
-  patternLength: 8,
   tempo: 126,
   programName: "Program",
   selectedLine: 0,
@@ -231,6 +253,41 @@ const delayTimeFromTempo = (tempo: number, subdivision: DelaySubdivision): numbe
   return (60 / tempo) * beats;
 };
 
+const openLocalDb = (): Promise<IDBDatabase> =>
+  new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(LIBRARIES_STORE)) {
+        db.createObjectStore(LIBRARIES_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(PATTERNS_STORE)) {
+        const store = db.createObjectStore(PATTERNS_STORE, { keyPath: "id" });
+        store.createIndex("by_library", "libraryId", { unique: false });
+        store.createIndex("by_updated", "updatedAt", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Failed to open local database."));
+  });
+
+const runWrite = (db: IDBDatabase, storeNames: string[], operation: (tx: IDBTransaction) => void): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const tx = db.transaction(storeNames, "readwrite");
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("Database write transaction failed."));
+    tx.onabort = () => reject(tx.error ?? new Error("Database write transaction aborted."));
+    operation(tx);
+  });
+
+const getAllFromStore = <T,>(db: IDBDatabase, storeName: string): Promise<T[]> =>
+  new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readonly");
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve((req.result as T[]) ?? []);
+    req.onerror = () => reject(req.error ?? new Error(`Failed to read ${storeName}.`));
+  });
+
 const findBaseStep = (steps: Step[], step: number): number | null => {
   if (steps[step].timeMode === "note" && steps[step].pitch) return step;
   if (steps[step].timeMode !== "tie") return null;
@@ -241,9 +298,13 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
   return null;
 };
 
+const mapLegacyPatternLength = (raw: unknown): number => {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 8;
+  return Math.max(4, Math.min(16, raw));
+};
+
 function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
-  const [patternLength, setPatternLength] = useState(DEFAULT_PROJECT_STATE.patternLength);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
@@ -252,6 +313,9 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(-1);
   const [exportPreviewUrl, setExportPreviewUrl] = useState<string | null>(null);
+  const [libraries, setLibraries] = useState<LibraryRecord[]>([]);
+  const [patterns, setPatterns] = useState<PatternRecord[]>([]);
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>("default");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -262,7 +326,15 @@ function App() {
   const lineFxRef = useRef<Array<LineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
-  const patternLengthRef = useRef(patternLength);
+
+  const buildProjectSnapshot = (): ProjectData => ({
+    version: 1,
+    programName,
+    lineCount,
+    tempo,
+    selectedLine,
+    lines,
+  });
 
   const ensureAudio = (lineIndex?: number) => {
     const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -413,6 +485,11 @@ function App() {
     );
   };
 
+  const updateVoicePatternLength = (value: number) => {
+    const nextLength = Math.max(4, Math.min(16, value));
+    setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
+  };
+
   const playStep = (lineIndex: number, line: LineState, stepIndex: number, stepLenSeconds: number) => {
     const step = line.steps[stepIndex];
     if (step.timeMode !== "note" || !step.pitch) return;
@@ -425,7 +502,7 @@ function App() {
     if (ctx.state === "suspended") void ctx.resume();
 
     let noteSteps = 1;
-    for (let s = stepIndex + 1; s < patternLengthRef.current; s += 1) {
+    for (let s = stepIndex + 1; s < line.patternLength; s += 1) {
       if (line.steps[s].timeMode === "tie") noteSteps += 1;
       else break;
     }
@@ -442,7 +519,7 @@ function App() {
     osc.frequency.setValueAtTime(freq, now);
 
     if (step.slide) {
-      const prevIdx = (stepIndex - 1 + patternLengthRef.current) % patternLengthRef.current;
+      const prevIdx = (stepIndex - 1 + line.patternLength) % line.patternLength;
       const prevBase = findBaseStep(line.steps, prevIdx);
       if (prevBase !== null) {
         const prevStep = line.steps[prevBase];
@@ -497,11 +574,14 @@ function App() {
     lineCountRef.current = lineCount;
   }, [lineCount]);
   useEffect(() => {
-    patternLengthRef.current = patternLength;
-  }, [patternLength]);
-  useEffect(() => {
     setSelectedLine((prev) => Math.min(prev, lineCount - 1));
   }, [lineCount]);
+  useEffect(() => {
+    void (async () => {
+      await ensureDefaultLibrary();
+      await refreshLocalStorageData();
+    })();
+  }, []);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -516,10 +596,12 @@ function App() {
       const step = stepRef.current;
       const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
-        playStep(li, linesNow[li], step, stepSec);
+        const voiceLength = Math.max(4, Math.min(16, linesNow[li].patternLength));
+        playStep(li, linesNow[li], step % voiceLength, stepSec);
       }
-      setPlayhead(step);
-      stepRef.current = (step + 1) % patternLengthRef.current;
+      const selectedVoiceLength = Math.max(4, Math.min(16, linesNow[selectedLine]?.patternLength ?? 8));
+      setPlayhead(step % selectedVoiceLength);
+      stepRef.current = step + 1;
     };
     tick();
     timerRef.current = window.setInterval(tick, stepMs);
@@ -529,7 +611,7 @@ function App() {
         timerRef.current = null;
       }
     };
-  }, [isPlaying, tempo]);
+  }, [isPlaying, tempo, selectedLine]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -547,14 +629,14 @@ function App() {
     ctx.fillText(`Pattern Name: ${patternName}`, 16, 52);
     ctx.fillText(`BPM: ${tempo}  Wave: ${lines[selectedLine].params.waveform.toUpperCase()}`, 16, 70);
 
-    const cols = patternLength;
+    const cols = lines[selectedLine].patternLength;
     const left = 16;
     const top = 84;
     const rowHeight = 24;
     const labelWidth = 100;
     const colWidth = Math.floor((canvas.width - left - labelWidth - 16) / cols);
     const labels = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"];
-    const active = lines[selectedLine].steps.slice(0, patternLength);
+    const active = lines[selectedLine].steps.slice(0, lines[selectedLine].patternLength);
 
     labels.forEach((label, r) => {
       const y = top + r * rowHeight;
@@ -581,7 +663,7 @@ function App() {
         if (value) ctx.fillText(value, x + 8, y + 16);
       }
     });
-  }, [lines, patternLength, selectedLine, tempo, programName]);
+  }, [lines, selectedLine, tempo, programName]);
 
   const buildExportDataUrl = () => {
     const canvas = document.createElement("canvas");
@@ -604,19 +686,19 @@ function App() {
     ctx.fillText(`Pattern Name: ${patternName}`, 24, 72);
     ctx.fillText(`BPM: ${tempo}   Pattern Number: ${selectedLine + 1}`, 24, 92);
 
-    const active = lines[selectedLine].steps.slice(0, patternLength);
+    const active = lines[selectedLine].steps.slice(0, lines[selectedLine].patternLength);
     const left = 24;
     const top = 110;
     const rowHeight = 30;
     const labelWidth = 110;
-    const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / patternLength);
+    const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / lines[selectedLine].patternLength);
     const rows = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"];
 
     rows.forEach((row, r) => {
       const y = top + r * rowHeight;
       ctx.strokeRect(left, y, labelWidth, rowHeight);
       ctx.fillText(row, left + 8, y + 20);
-      for (let i = 0; i < patternLength; i += 1) {
+      for (let i = 0; i < lines[selectedLine].patternLength; i += 1) {
         const x = left + labelWidth + i * colWidth;
         ctx.strokeRect(x, y, colWidth, rowHeight);
         const step = active[i];
@@ -651,20 +733,12 @@ function App() {
       .replace(/^-+|-+$/g, "");
     const link = document.createElement("a");
     link.href = exportPreviewUrl;
-    link.download = `tb303-${safeProgramName || "program"}-line-${selectedLine + 1}-${Date.now()}.png`;
+    link.download = `tb303-${safeProgramName || "program"}-voice-${selectedLine + 1}-${Date.now()}.png`;
     link.click();
   };
 
   const exportProjectJson = () => {
-    const payload: ProjectData = {
-      version: 1,
-      programName,
-      lineCount,
-      patternLength,
-      tempo,
-      selectedLine,
-      lines,
-    };
+    const payload = buildProjectSnapshot();
     const baseProgramName = programName.trim() || "program";
     const safeProgramName = baseProgramName
       .toLowerCase()
@@ -685,21 +759,23 @@ function App() {
     if (data.version !== 1) throw new Error("Unsupported JSON version.");
     if (typeof data.programName !== "string") throw new Error("programName must be a string.");
     if (data.lineCount !== 1 && data.lineCount !== 2 && data.lineCount !== 3) throw new Error("voiceCount must be 1, 2, or 3.");
-    if (typeof data.patternLength !== "number" || !Number.isFinite(data.patternLength) || data.patternLength < 4 || data.patternLength > 16) {
-      throw new Error("patternLength must be a number between 4 and 16.");
-    }
     if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
     if (typeof data.selectedLine !== "number" || !Number.isInteger(data.selectedLine)) throw new Error("selectedLine must be an integer.");
     if (data.selectedLine < 0 || data.selectedLine >= MAX_LINES) throw new Error("selectedLine is out of range.");
     if (!Array.isArray(data.lines) || data.lines.length !== MAX_LINES) throw new Error(`lines must contain exactly ${MAX_LINES} line entries.`);
 
     const normalizedLines = data.lines.map((line, lineIndex): LineState => {
-      if (!line || typeof line !== "object") throw new Error(`Line ${lineIndex + 1} is invalid.`);
+      if (!line || typeof line !== "object") throw new Error(`Voice ${lineIndex + 1} is invalid.`);
       const lineObj = line as Record<string, unknown>;
-      if (!Array.isArray(lineObj.steps) || lineObj.steps.length !== STEPS) throw new Error(`Line ${lineIndex + 1} must have ${STEPS} steps.`);
-      if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Line ${lineIndex + 1} params are invalid.`);
+      if (!Array.isArray(lineObj.steps) || lineObj.steps.length !== STEPS) throw new Error(`Voice ${lineIndex + 1} must have ${STEPS} steps.`);
+      if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Voice ${lineIndex + 1} params are invalid.`);
+      const fallbackLength = mapLegacyPatternLength(data.patternLength);
+      const patternLength = typeof lineObj.patternLength === "number" ? lineObj.patternLength : fallbackLength;
+      if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > 16) {
+        throw new Error(`Voice ${lineIndex + 1} patternLength must be between 4 and 16.`);
+      }
       const paramsRaw = lineObj.params as Record<string, unknown>;
-      if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`Line ${lineIndex + 1} waveform is invalid.`);
+      if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`Voice ${lineIndex + 1} waveform is invalid.`);
 
       const params: VoiceParams = {
         waveform: paramsRaw.waveform,
@@ -719,24 +795,24 @@ function App() {
         reverb: typeof paramsRaw.reverb === "number" ? Number(paramsRaw.reverb) : 0,
       };
       if (Object.values(params).some((v) => (typeof v === "number" ? !Number.isFinite(v) : false))) {
-        throw new Error(`Line ${lineIndex + 1} params contain invalid numbers.`);
+        throw new Error(`Voice ${lineIndex + 1} params contain invalid numbers.`);
       }
 
       const steps: Step[] = lineObj.steps.map((stepRaw, stepIndex) => {
-        if (!stepRaw || typeof stepRaw !== "object") throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} is invalid.`);
+        if (!stepRaw || typeof stepRaw !== "object") throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} is invalid.`);
         const step = stepRaw as Record<string, unknown>;
         if (step.timeMode !== "note" && step.timeMode !== "tie" && step.timeMode !== "rest") {
-          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} has invalid timeMode.`);
+          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid timeMode.`);
         }
         if (step.transpose !== "none" && step.transpose !== "down" && step.transpose !== "up") {
-          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} has invalid transpose.`);
+          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid transpose.`);
         }
         if (typeof step.accent !== "boolean" || typeof step.slide !== "boolean") {
-          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} has invalid flags.`);
+          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid flags.`);
         }
         const pitch = step.pitch === null ? null : isPitchName(step.pitch) ? step.pitch : null;
         if (step.timeMode === "note" && !pitch) {
-          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} note step must have a valid pitch.`);
+          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} note step must have a valid pitch.`);
         }
         return {
           pitch,
@@ -747,14 +823,13 @@ function App() {
         };
       });
 
-      return { steps, params };
+      return { patternLength, steps, params };
     });
 
     return {
       version: 1,
       programName: data.programName,
       lineCount: data.lineCount,
-      patternLength: data.patternLength,
       tempo: data.tempo,
       selectedLine: data.selectedLine,
       lines: normalizedLines,
@@ -769,7 +844,6 @@ function App() {
       const parsed = validateProjectData(JSON.parse(text));
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
-      setPatternLength(parsed.patternLength);
       setTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
@@ -779,6 +853,110 @@ function App() {
     } finally {
       event.currentTarget.value = "";
     }
+  };
+
+  const refreshLocalStorageData = async () => {
+    const db = await openLocalDb();
+    try {
+      const [libraryRows, patternRows] = await Promise.all([
+        getAllFromStore<LibraryRecord>(db, LIBRARIES_STORE),
+        getAllFromStore<PatternRecord>(db, PATTERNS_STORE),
+      ]);
+      setLibraries(libraryRows.sort((a, b) => b.updatedAt - a.updatedAt));
+      setPatterns(patternRows.sort((a, b) => b.updatedAt - a.updatedAt));
+    } finally {
+      db.close();
+    }
+  };
+
+  const ensureDefaultLibrary = async () => {
+    const db = await openLocalDb();
+    try {
+      const now = Date.now();
+      await runWrite(db, [LIBRARIES_STORE], (tx) => {
+        const store = tx.objectStore(LIBRARIES_STORE);
+        store.put({ id: "default", name: "Default Library", createdAt: now, updatedAt: now } satisfies LibraryRecord);
+      });
+    } finally {
+      db.close();
+    }
+  };
+
+  const createLibrary = async () => {
+    const name = window.prompt("Library name");
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const id = `lib-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+    const db = await openLocalDb();
+    try {
+      await runWrite(db, [LIBRARIES_STORE], (tx) => {
+        tx.objectStore(LIBRARIES_STORE).put({ id, name: trimmed, createdAt: now, updatedAt: now } satisfies LibraryRecord);
+      });
+    } finally {
+      db.close();
+    }
+    setSelectedLibraryId(id);
+    await refreshLocalStorageData();
+  };
+
+  const savePatternToLibrary = async () => {
+    const patternName = window.prompt("Pattern name", programName.trim() || "Pattern");
+    if (!patternName) return;
+    const trimmed = patternName.trim();
+    if (!trimmed) return;
+    const now = Date.now();
+    const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const db = await openLocalDb();
+    try {
+      await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
+        tx.objectStore(PATTERNS_STORE).put({
+          id,
+          libraryId: selectedLibraryId,
+          name: trimmed,
+          project: buildProjectSnapshot(),
+          createdAt: now,
+          updatedAt: now,
+        } satisfies PatternRecord);
+        const libReq = tx.objectStore(LIBRARIES_STORE).get(selectedLibraryId);
+        libReq.onsuccess = () => {
+          const lib = libReq.result as LibraryRecord | undefined;
+          if (lib) {
+            tx.objectStore(LIBRARIES_STORE).put({ ...lib, updatedAt: now });
+          }
+        };
+      });
+    } finally {
+      db.close();
+    }
+    await refreshLocalStorageData();
+  };
+
+  const loadPattern = (pattern: PatternRecord) => {
+    try {
+      const parsed = validateProjectData(pattern.project);
+      setProgramName(parsed.programName);
+      setLineCount(parsed.lineCount);
+      setTempo(parsed.tempo);
+      setSelectedLine(parsed.selectedLine);
+      setLines(parsed.lines);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid stored pattern.";
+      window.alert(`Load failed: ${message}`);
+    }
+  };
+
+  const deletePattern = async (patternId: string) => {
+    const db = await openLocalDb();
+    try {
+      await runWrite(db, [PATTERNS_STORE], (tx) => {
+        tx.objectStore(PATTERNS_STORE).delete(patternId);
+      });
+    } finally {
+      db.close();
+    }
+    await refreshLocalStorageData();
   };
 
   const resetPattern = () => {
@@ -802,9 +980,11 @@ function App() {
   useEffect(() => {
     const url = buildExportDataUrl();
     if (url) setExportPreviewUrl(url);
-  }, [lines, patternLength, selectedLine, tempo, programName]);
+  }, [lines, selectedLine, tempo, programName]);
 
   const params = lines[selectedLine].params;
+  const patternLength = lines[selectedLine].patternLength;
+  const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
 
   return (
     <main className="app">
@@ -827,7 +1007,7 @@ function App() {
                 min={4}
                 max={16}
                 value={patternLength}
-                onChange={(e) => setPatternLength(Math.max(4, Math.min(16, Number(e.currentTarget.value))))}
+                onChange={(e) => updateVoicePatternLength(Number(e.currentTarget.value))}
               />
             </label>
             <label className="header-program">
@@ -836,9 +1016,21 @@ function App() {
             </label>
             <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
             <button onClick={resetPattern}>Reset</button>
+            <button onClick={savePatternToLibrary}>Save Local</button>
             <button onClick={exportProjectJson}>Export</button>
             <button onClick={() => importRef.current?.click()}>Import</button>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
+            <label className="header-program">
+              Library
+              <select value={selectedLibraryId} onChange={(e) => setSelectedLibraryId(e.currentTarget.value)}>
+                {libraries.map((library) => (
+                  <option key={library.id} value={library.id}>
+                    {library.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button onClick={createLibrary}>New Library</button>
           </div>
         </div>
       </header>
@@ -1044,6 +1236,24 @@ function App() {
               <button onClick={savePreviewPng} disabled={!exportPreviewUrl}>
                 Save PNG
               </button>
+            </div>
+            <div className="library-browser">
+              <h2>Pattern Library</h2>
+              <div className="library-list">
+                {visiblePatterns.length === 0 ? (
+                  <p className="preview-help">No saved patterns in this library yet.</p>
+                ) : (
+                  visiblePatterns.map((pattern) => (
+                    <div key={pattern.id} className="library-item">
+                      <span>{pattern.name}</span>
+                      <div className="library-item-actions">
+                        <button onClick={() => loadPattern(pattern)}>Load</button>
+                        <button onClick={() => void deletePattern(pattern.id)}>Delete</button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
             {exportPreviewUrl ? (
               <div className="sheet-preview-wrap">
