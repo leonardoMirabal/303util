@@ -52,6 +52,19 @@ body {
   gap: 6px;
 }
 
+.header-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-primary-actions .play-button {
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  min-width: 88px;
+}
+
 .header-actions {
   margin-left: auto;
   display: flex;

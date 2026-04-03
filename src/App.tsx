@@ -100,6 +100,8 @@ const DB_NAME = "tb303-local-db";
 const DB_VERSION = 1;
 const LIBRARIES_STORE = "libraries";
 const PATTERNS_STORE = "patterns";
+const LAST_LIBRARY_ID_KEY = "tb303:last-library-id";
+const LAST_PATTERN_ID_KEY = "tb303:last-pattern-id";
 
 const defaultParams = (): VoiceParams => ({
   waveform: "sawtooth",
@@ -315,7 +317,9 @@ function App() {
   const [exportPreviewUrl, setExportPreviewUrl] = useState<string | null>(null);
   const [libraries, setLibraries] = useState<LibraryRecord[]>([]);
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
-  const [selectedLibraryId, setSelectedLibraryId] = useState<string>("default");
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
+  const [selectedPatternId, setSelectedPatternId] = useState<string>(() => window.localStorage.getItem(LAST_PATTERN_ID_KEY) ?? "");
+  const [storageAction, setStorageAction] = useState("menu");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -326,6 +330,7 @@ function App() {
   const lineFxRef = useRef<Array<LineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
+  const restoredPatternRef = useRef(false);
 
   const buildProjectSnapshot = (): ProjectData => ({
     version: 1,
@@ -582,7 +587,51 @@ function App() {
       await refreshLocalStorageData();
     })();
   }, []);
-
+  useEffect(() => {
+    if (libraries.length === 0) return;
+    if (!libraries.some((library) => library.id === selectedLibraryId)) {
+      setSelectedLibraryId(libraries[0].id);
+    }
+  }, [libraries, selectedLibraryId]);
+  useEffect(() => {
+    if (patterns.length === 0) return;
+    const stillValid = patterns.some((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
+    if (!stillValid) {
+      const firstInLibrary = patterns.find((pattern) => pattern.libraryId === selectedLibraryId);
+      setSelectedPatternId(firstInLibrary?.id ?? "");
+    }
+  }, [selectedLibraryId, patterns, selectedPatternId]);
+  useEffect(() => {
+    if (!selectedPatternId) return;
+    const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
+    if (selectedPattern) loadPattern(selectedPattern);
+  }, [selectedPatternId, selectedLibraryId, patterns]);
+  useEffect(() => {
+    window.localStorage.setItem(LAST_LIBRARY_ID_KEY, selectedLibraryId);
+  }, [selectedLibraryId]);
+  useEffect(() => {
+    window.localStorage.setItem(LAST_PATTERN_ID_KEY, selectedPatternId);
+  }, [selectedPatternId]);
+  useEffect(() => {
+    if (restoredPatternRef.current || patterns.length === 0) return;
+    const lastLibraryId = window.localStorage.getItem(LAST_LIBRARY_ID_KEY);
+    const lastPatternId = window.localStorage.getItem(LAST_PATTERN_ID_KEY);
+    if (!lastPatternId) {
+      restoredPatternRef.current = true;
+      return;
+    }
+    const selectedPattern = patterns.find(
+      (pattern) => pattern.id === lastPatternId && (!lastLibraryId || pattern.libraryId === lastLibraryId),
+    );
+    if (!selectedPattern) {
+      restoredPatternRef.current = true;
+      return;
+    }
+    setSelectedLibraryId(selectedPattern.libraryId);
+    setSelectedPatternId(selectedPattern.id);
+    loadPattern(selectedPattern);
+    restoredPatternRef.current = true;
+  }, [patterns]);
   useEffect(() => {
     if (!isPlaying) return;
     if (timerRef.current !== null) {
@@ -762,9 +811,14 @@ function App() {
     if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
     if (typeof data.selectedLine !== "number" || !Number.isInteger(data.selectedLine)) throw new Error("selectedLine must be an integer.");
     if (data.selectedLine < 0 || data.selectedLine >= MAX_LINES) throw new Error("selectedLine is out of range.");
-    if (!Array.isArray(data.lines) || data.lines.length !== MAX_LINES) throw new Error(`lines must contain exactly ${MAX_LINES} line entries.`);
+    if (!Array.isArray(data.lines) || data.lines.length < 1 || data.lines.length > MAX_LINES) {
+      throw new Error(`lines must contain between 1 and ${MAX_LINES} voice entries.`);
+    }
 
-    const normalizedLines = data.lines.map((line, lineIndex): LineState => {
+    const sourceLines = [...data.lines];
+    while (sourceLines.length < MAX_LINES) sourceLines.push(makeLine());
+
+    const normalizedLines = sourceLines.map((line, lineIndex): LineState => {
       if (!line || typeof line !== "object") throw new Error(`Voice ${lineIndex + 1} is invalid.`);
       const lineObj = line as Record<string, unknown>;
       if (!Array.isArray(lineObj.steps) || lineObj.steps.length !== STEPS) throw new Error(`Voice ${lineIndex + 1} must have ${STEPS} steps.`);
@@ -831,7 +885,7 @@ function App() {
       programName: data.programName,
       lineCount: data.lineCount,
       tempo: data.tempo,
-      selectedLine: data.selectedLine,
+      selectedLine: Math.min(data.selectedLine, data.lineCount - 1),
       lines: normalizedLines,
     };
   };
@@ -883,9 +937,9 @@ function App() {
   };
 
   const createLibrary = async () => {
-    const name = window.prompt("Library name");
-    if (!name) return;
-    const trimmed = name.trim();
+    const libraryName = window.prompt("Library name");
+    if (!libraryName) return;
+    const trimmed = libraryName.trim();
     if (!trimmed) return;
     const id = `lib-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const now = Date.now();
@@ -901,22 +955,52 @@ function App() {
     await refreshLocalStorageData();
   };
 
-  const savePatternToLibrary = async () => {
+  const savePatternToLibrary = async (libraryId?: string) => {
     const patternName = window.prompt("Pattern name", programName.trim() || "Pattern");
     if (!patternName) return;
     const trimmed = patternName.trim();
     if (!trimmed) return;
     const now = Date.now();
     const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const targetLibraryId = libraryId ?? selectedLibraryId;
     const db = await openLocalDb();
     try {
       await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
         tx.objectStore(PATTERNS_STORE).put({
           id,
-          libraryId: selectedLibraryId,
+          libraryId: targetLibraryId,
           name: trimmed,
-          project: buildProjectSnapshot(),
+          project: JSON.parse(JSON.stringify(buildProjectSnapshot())) as ProjectData,
           createdAt: now,
+          updatedAt: now,
+        } satisfies PatternRecord);
+        const libReq = tx.objectStore(LIBRARIES_STORE).get(targetLibraryId);
+        libReq.onsuccess = () => {
+          const lib = libReq.result as LibraryRecord | undefined;
+          if (lib) {
+            tx.objectStore(LIBRARIES_STORE).put({ ...lib, updatedAt: now });
+          }
+        };
+      });
+    } finally {
+      db.close();
+    }
+    await refreshLocalStorageData();
+  };
+
+  const saveSelectedPattern = async () => {
+    const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
+    if (!selectedPattern) {
+      await savePatternToLibrary(selectedLibraryId);
+      return;
+    }
+    const now = Date.now();
+    const db = await openLocalDb();
+    try {
+      await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
+        tx.objectStore(PATTERNS_STORE).put({
+          ...selectedPattern,
+          project: JSON.parse(JSON.stringify(buildProjectSnapshot())) as ProjectData,
           updatedAt: now,
         } satisfies PatternRecord);
         const libReq = tx.objectStore(LIBRARIES_STORE).get(selectedLibraryId);
@@ -933,9 +1017,107 @@ function App() {
     await refreshLocalStorageData();
   };
 
+  const createEmptyPattern = async () => {
+    const patternName = window.prompt("Pattern name", "New Pattern");
+    if (!patternName) return;
+    const trimmed = patternName.trim();
+    if (!trimmed) return;
+    const now = Date.now();
+    const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const targetLibraryId = selectedLibraryId;
+    const baseVoiceLength = lines[selectedLine]?.patternLength ?? 8;
+    const emptyProject: ProjectData = {
+      version: 1,
+      programName: trimmed,
+      lineCount,
+      tempo,
+      selectedLine: 0,
+      lines: Array.from({ length: MAX_LINES }, () => ({
+        patternLength: baseVoiceLength,
+        steps: Array.from({ length: STEPS }, () => ({
+          pitch: null,
+          timeMode: "rest",
+          accent: false,
+          slide: false,
+          transpose: "none",
+        })),
+        params: defaultParams(),
+      })),
+    };
+
+    const db = await openLocalDb();
+    try {
+      await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
+        tx.objectStore(PATTERNS_STORE).put({
+          id,
+          libraryId: targetLibraryId,
+          name: trimmed,
+          project: emptyProject,
+          createdAt: now,
+          updatedAt: now,
+        } satisfies PatternRecord);
+        const libReq = tx.objectStore(LIBRARIES_STORE).get(targetLibraryId);
+        libReq.onsuccess = () => {
+          const lib = libReq.result as LibraryRecord | undefined;
+          if (lib) {
+            tx.objectStore(LIBRARIES_STORE).put({ ...lib, updatedAt: now });
+          }
+        };
+      });
+    } finally {
+      db.close();
+    }
+    await refreshLocalStorageData();
+    setSelectedPatternId(id);
+    loadPattern({
+      id,
+      libraryId: targetLibraryId,
+      name: trimmed,
+      project: emptyProject,
+      createdAt: now,
+      updatedAt: now,
+    });
+  };
+
+  const openUnsavedEmptyPattern = () => {
+    const baseVoiceLength = lines[selectedLine]?.patternLength ?? 8;
+    const emptyProject: ProjectData = {
+      version: 1,
+      programName: "Untitled",
+      lineCount,
+      tempo,
+      selectedLine: 0,
+      lines: Array.from({ length: MAX_LINES }, () => ({
+        patternLength: baseVoiceLength,
+        steps: Array.from({ length: STEPS }, () => ({
+          pitch: null,
+          timeMode: "rest",
+          accent: false,
+          slide: false,
+          transpose: "none",
+        })),
+        params: defaultParams(),
+      })),
+    };
+    setSelectedPatternId("");
+    loadPattern({
+      id: "unsaved-empty",
+      libraryId: selectedLibraryId,
+      name: "Untitled",
+      project: emptyProject,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  };
+
   const loadPattern = (pattern: PatternRecord) => {
     try {
-      const parsed = validateProjectData(pattern.project);
+      const raw = typeof pattern.project === "string" ? JSON.parse(pattern.project) : pattern.project;
+      const parsed = validateProjectData(raw);
+      setIsPlaying(false);
+      setPlayhead(-1);
+      stepRef.current = 0;
+      setWorkspaceView("editor");
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
       setTempo(parsed.tempo);
@@ -957,6 +1139,81 @@ function App() {
       db.close();
     }
     await refreshLocalStorageData();
+  };
+
+  const deleteLibrary = async () => {
+    if (selectedLibraryId === "default") {
+      window.alert("Default Library cannot be deleted.");
+      return;
+    }
+    const currentLibrary = libraries.find((library) => library.id === selectedLibraryId);
+    const ok = window.confirm(`Delete library "${currentLibrary?.name ?? selectedLibraryId}" and all its patterns?`);
+    if (!ok) return;
+    const db = await openLocalDb();
+    try {
+      const allPatterns = await getAllFromStore<PatternRecord>(db, PATTERNS_STORE);
+      const idsToDelete = allPatterns.filter((pattern) => pattern.libraryId === selectedLibraryId).map((pattern) => pattern.id);
+      await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
+        const patternStore = tx.objectStore(PATTERNS_STORE);
+        idsToDelete.forEach((id) => patternStore.delete(id));
+        tx.objectStore(LIBRARIES_STORE).delete(selectedLibraryId);
+      });
+    } finally {
+      db.close();
+    }
+    setSelectedLibraryId("default");
+    await refreshLocalStorageData();
+  };
+
+  const runStorageAction = async (action: string) => {
+    if (!action) return;
+    if (action === "export-json") {
+      exportProjectJson();
+      return;
+    }
+    if (action === "import-json") {
+      importRef.current?.click();
+      return;
+    }
+    if (action === "delete-library") {
+      const currentLibrary = libraries.find((library) => library.id === selectedLibraryId);
+      if (!currentLibrary || currentLibrary.id === "default") {
+        window.alert("Default Library cannot be deleted.");
+        return;
+      }
+      await deleteLibrary();
+      return;
+    }
+
+    if (action === "new-library") {
+      await createLibrary();
+      return;
+    }
+
+    if (action === "save-pattern") {
+      await saveSelectedPattern();
+      return;
+    }
+
+    const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
+    const selectedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
+    if (!selectedPattern) {
+      window.alert("Pick a saved pattern first.");
+      return;
+    }
+
+    if (action === "load-pattern") {
+      loadPattern(selectedPattern);
+      return;
+    }
+
+    if (action === "delete-pattern") {
+      const ok = window.confirm(`Delete pattern "${selectedPattern.name}"?`);
+      if (!ok) return;
+      await deletePattern(selectedPattern.id);
+      openUnsavedEmptyPattern();
+      return;
+    }
   };
 
   const resetPattern = () => {
@@ -991,6 +1248,32 @@ function App() {
       <header className="panel header-panel">
         <div className="header-row">
           <h1>TB-303 Companion</h1>
+          <div className="header-primary-actions">
+            <button className="play-button" onClick={() => setIsPlaying((v) => !v)}>
+              {isPlaying ? "Stop" : "Play"}
+            </button>
+            <button onClick={resetPattern}>Reset</button>
+            <button onClick={() => void createEmptyPattern()} title="New empty pattern">
+              +
+            </button>
+            <button onClick={() => void saveSelectedPattern()}>Save</button>
+            <button
+              onClick={() => {
+                const selectedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
+                if (!selectedPattern) return;
+                const ok = window.confirm(`Delete pattern "${selectedPattern.name}"?`);
+                if (!ok) return;
+                void (async () => {
+                  await deletePattern(selectedPattern.id);
+                  openUnsavedEmptyPattern();
+                })();
+              }}
+              title="Delete selected pattern"
+              disabled={!selectedPatternId}
+            >
+              Delete
+            </button>
+          </div>
           <div className="header-actions">
             <label className="header-small">
               Voices
@@ -1014,11 +1297,6 @@ function App() {
               Program
               <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
             </label>
-            <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
-            <button onClick={resetPattern}>Reset</button>
-            <button onClick={savePatternToLibrary}>Save Local</button>
-            <button onClick={exportProjectJson}>Export</button>
-            <button onClick={() => importRef.current?.click()}>Import</button>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
             <label className="header-program">
               Library
@@ -1030,7 +1308,33 @@ function App() {
                 ))}
               </select>
             </label>
-            <button onClick={createLibrary}>New Library</button>
+            <label className="header-program">
+              Pattern
+              <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
+                <option value="">Select...</option>
+                {visiblePatterns.map((pattern) => (
+                  <option key={pattern.id} value={pattern.id}>
+                    {pattern.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <select
+              value={storageAction}
+              onChange={(e) => {
+                const action = e.currentTarget.value;
+                setStorageAction("menu");
+                void runStorageAction(action);
+              }}
+            >
+              <option value="menu">Menu...</option>
+              <option value="export-json">Export JSON</option>
+              <option value="import-json">Import JSON</option>
+              <option value="save-pattern">Save Pattern</option>
+              <option value="delete-pattern">Delete Pattern</option>
+              <option value="new-library">New Library</option>
+              <option value="delete-library">Delete Library</option>
+            </select>
           </div>
         </div>
       </header>
@@ -1060,18 +1364,7 @@ function App() {
             <div className="delay-divider" />
 
             <div className="knob-grid fx-knobs">
-              <KnobControl
-                label="Delay Time"
-                min={0.02}
-                max={1}
-                step={0.01}
-                value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-                disabled={params.delaySync}
-                onChange={(v) => updateParams({ delayTime: v })}
-                format={(v) => `${v.toFixed(2)}s`}
-              />
               <label className="knob-control delay-sync-control">
-                <span className="knob-label">Delay Sync</span>
                 <button
                   className={params.delaySync ? "selected" : ""}
                   onClick={() => updateParams({ delaySync: !params.delaySync })}
@@ -1090,6 +1383,16 @@ function App() {
                   ))}
                 </select>
               </label>
+              <KnobControl
+                label="Delay Time"
+                min={0.02}
+                max={1}
+                step={0.01}
+                value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+                disabled={params.delaySync}
+                onChange={(v) => updateParams({ delayTime: v })}
+                format={(v) => `${v.toFixed(2)}s`}
+              />
               <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
               <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
               <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
@@ -1236,24 +1539,6 @@ function App() {
               <button onClick={savePreviewPng} disabled={!exportPreviewUrl}>
                 Save PNG
               </button>
-            </div>
-            <div className="library-browser">
-              <h2>Pattern Library</h2>
-              <div className="library-list">
-                {visiblePatterns.length === 0 ? (
-                  <p className="preview-help">No saved patterns in this library yet.</p>
-                ) : (
-                  visiblePatterns.map((pattern) => (
-                    <div key={pattern.id} className="library-item">
-                      <span>{pattern.name}</span>
-                      <div className="library-item-actions">
-                        <button onClick={() => loadPattern(pattern)}>Load</button>
-                        <button onClick={() => void deletePattern(pattern.id)}>Delete</button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
             </div>
             {exportPreviewUrl ? (
               <div className="sheet-preview-wrap">
