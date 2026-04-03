@@ -708,7 +708,7 @@ function App() {
         if (label === "UP") value = step.transpose === "up" ? "x" : "";
         if (label === "ACC") value = step.accent ? "x" : "";
         if (label === "SLIDE") value = step.slide ? "x" : "";
-        if (label === "TIME") value = step.timeMode === "note" ? "N" : step.timeMode === "tie" ? "T" : "";
+        if (label === "TIME") value = step.timeMode === "note" ? "𝅘𝅥𝅯" : step.timeMode === "tie" ? "⁀𝅘𝅥𝅯" : "";
         if (value) ctx.fillText(value, x + 8, y + 16);
       }
     });
@@ -762,7 +762,7 @@ function App() {
         if (row === "UP") value = step.transpose === "up" ? "x" : "";
         if (row === "ACC") value = step.accent ? "x" : "";
         if (row === "SLIDE") value = step.slide ? "x" : "";
-        if (row === "TIME") value = step.timeMode === "note" ? "N" : step.timeMode === "tie" ? "T" : "";
+        if (row === "TIME") value = step.timeMode === "note" ? "𝅘𝅥𝅯" : step.timeMode === "tie" ? "⁀𝅘𝅥𝅯" : "";
         if (value) ctx.fillText(value, x + 8, y + 20);
       }
     });
