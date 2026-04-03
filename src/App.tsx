@@ -44,6 +44,16 @@ type LineFx = {
   feedback: GainNode;
 };
 
+type ProjectData = {
+  version: 1;
+  programName: string;
+  lineCount: 2 | 3;
+  patternLength: number;
+  tempo: number;
+  selectedLine: number;
+  lines: LineState[];
+};
+
 const defaultParams = (): VoiceParams => ({
   waveform: "sawtooth",
   tune: 0,
@@ -87,6 +97,8 @@ const transposeNote = (freq: number, mode: Transpose) => {
   if (mode === "up") return freq * 2;
   return freq;
 };
+
+const isPitchName = (value: unknown): value is PitchName => typeof value === "string" && (PITCHES as readonly string[]).includes(value);
 
 const shortNote = (pitch: PitchName | null): string => (pitch ? pitch.replace("#", "+") : "-");
 
@@ -138,6 +150,8 @@ function App() {
   const [lineCount, setLineCount] = useState<2 | 3>(2);
   const [patternLength, setPatternLength] = useState(16);
   const [tempo, setTempo] = useState(126);
+  const [programName, setProgramName] = useState("Program");
+  const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
   const [lines, setLines] = useState<LineState[]>(() => Array.from({ length: MAX_LINES }, () => makeLine()));
   const [selectedLine, setSelectedLine] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -145,6 +159,7 @@ function App() {
   const [exportPreviewUrl, setExportPreviewUrl] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
   const stepRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
@@ -376,13 +391,15 @@ function App() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const baseProgramName = programName.trim() || "Program";
+    const patternName = `${baseProgramName} - ${selectedLine + 1}`;
     ctx.fillStyle = "#f0f0f0";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#111";
     ctx.font = "bold 24px Arial";
     ctx.fillText("TB-303 Pattern Chart", 16, 30);
     ctx.font = "13px Arial";
-    ctx.fillText(`Pattern Name: Line ${selectedLine + 1}`, 16, 52);
+    ctx.fillText(`Pattern Name: ${patternName}`, 16, 52);
     ctx.fillText(`BPM: ${tempo}  Wave: ${lines[selectedLine].params.waveform.toUpperCase()}`, 16, 70);
 
     const cols = patternLength;
@@ -407,7 +424,7 @@ function App() {
         let value = "";
         if (label === "STEP") value = String(c + 1);
         if (label === "NOTE") {
-          if (step.timeMode === "rest") value = "-";
+          if (step.timeMode === "rest") value = "";
           else if (step.timeMode === "tie") value = "~";
           else value = shortNote(step.pitch);
         }
@@ -415,11 +432,11 @@ function App() {
         if (label === "UP") value = step.transpose === "up" ? "x" : "";
         if (label === "ACC") value = step.accent ? "x" : "";
         if (label === "SLIDE") value = step.slide ? "x" : "";
-        if (label === "TIME") value = step.timeMode === "note" ? "N" : step.timeMode === "tie" ? "T" : "R";
+        if (label === "TIME") value = step.timeMode === "note" ? "N" : step.timeMode === "tie" ? "T" : "";
         if (value) ctx.fillText(value, x + 8, y + 16);
       }
     });
-  }, [lines, patternLength, selectedLine, tempo]);
+  }, [lines, patternLength, selectedLine, tempo, programName]);
 
   const buildExportDataUrl = () => {
     const canvas = document.createElement("canvas");
@@ -427,6 +444,8 @@ function App() {
     canvas.height = 420;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
+    const baseProgramName = programName.trim() || "Program";
+    const patternName = `${baseProgramName} - ${selectedLine + 1}`;
 
     ctx.fillStyle = "#f8f8f8";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -437,7 +456,7 @@ function App() {
     ctx.font = "bold 34px Arial";
     ctx.fillText("TB-303 Pattern Chart", 24, 46);
     ctx.font = "13px Arial";
-    ctx.fillText(`Pattern Name: Line ${selectedLine + 1}`, 24, 72);
+    ctx.fillText(`Pattern Name: ${patternName}`, 24, 72);
     ctx.fillText(`BPM: ${tempo}   Pattern Number: ${selectedLine + 1}`, 24, 92);
 
     const active = lines[selectedLine].steps.slice(0, patternLength);
@@ -446,7 +465,7 @@ function App() {
     const rowHeight = 30;
     const labelWidth = 110;
     const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / patternLength);
-    const rows = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME", "EFX / Notes"];
+    const rows = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"];
 
     rows.forEach((row, r) => {
       const y = top + r * rowHeight;
@@ -459,7 +478,7 @@ function App() {
         let value = "";
         if (row === "STEP") value = String(i + 1);
         if (row === "NOTE") {
-          if (step.timeMode === "rest") value = "-";
+          if (step.timeMode === "rest") value = "";
           else if (step.timeMode === "tie") value = "~";
           else value = shortNote(step.pitch);
         }
@@ -467,7 +486,7 @@ function App() {
         if (row === "UP") value = step.transpose === "up" ? "x" : "";
         if (row === "ACC") value = step.accent ? "x" : "";
         if (row === "SLIDE") value = step.slide ? "x" : "";
-        if (row === "TIME") value = step.timeMode === "note" ? "N" : step.timeMode === "tie" ? "T" : "R";
+        if (row === "TIME") value = step.timeMode === "note" ? "N" : step.timeMode === "tie" ? "T" : "";
         if (value) ctx.fillText(value, x + 8, y + 20);
       }
     });
@@ -480,47 +499,186 @@ function App() {
   };
   const savePreviewPng = () => {
     if (!exportPreviewUrl) return;
+    const baseProgramName = programName.trim() || "program";
+    const safeProgramName = baseProgramName
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^-+|-+$/g, "");
     const link = document.createElement("a");
     link.href = exportPreviewUrl;
-    link.download = `tb303-line-${selectedLine + 1}-${Date.now()}.png`;
+    link.download = `tb303-${safeProgramName || "program"}-line-${selectedLine + 1}-${Date.now()}.png`;
     link.click();
+  };
+
+  const exportProjectJson = () => {
+    const payload: ProjectData = {
+      version: 1,
+      programName,
+      lineCount,
+      patternLength,
+      tempo,
+      selectedLine,
+      lines,
+    };
+    const baseProgramName = programName.trim() || "program";
+    const safeProgramName = baseProgramName
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `tb303-${safeProgramName || "program"}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const validateProjectData = (raw: unknown): ProjectData => {
+    if (!raw || typeof raw !== "object") throw new Error("Invalid JSON root object.");
+    const data = raw as Record<string, unknown>;
+    if (data.version !== 1) throw new Error("Unsupported JSON version.");
+    if (typeof data.programName !== "string") throw new Error("programName must be a string.");
+    if (data.lineCount !== 2 && data.lineCount !== 3) throw new Error("lineCount must be 2 or 3.");
+    if (typeof data.patternLength !== "number" || !Number.isFinite(data.patternLength) || data.patternLength < 4 || data.patternLength > 16) {
+      throw new Error("patternLength must be a number between 4 and 16.");
+    }
+    if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
+    if (typeof data.selectedLine !== "number" || !Number.isInteger(data.selectedLine)) throw new Error("selectedLine must be an integer.");
+    if (data.selectedLine < 0 || data.selectedLine >= MAX_LINES) throw new Error("selectedLine is out of range.");
+    if (!Array.isArray(data.lines) || data.lines.length !== MAX_LINES) throw new Error(`lines must contain exactly ${MAX_LINES} line entries.`);
+
+    const normalizedLines = data.lines.map((line, lineIndex): LineState => {
+      if (!line || typeof line !== "object") throw new Error(`Line ${lineIndex + 1} is invalid.`);
+      const lineObj = line as Record<string, unknown>;
+      if (!Array.isArray(lineObj.steps) || lineObj.steps.length !== STEPS) throw new Error(`Line ${lineIndex + 1} must have ${STEPS} steps.`);
+      if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Line ${lineIndex + 1} params are invalid.`);
+      const paramsRaw = lineObj.params as Record<string, unknown>;
+      if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`Line ${lineIndex + 1} waveform is invalid.`);
+
+      const params: VoiceParams = {
+        waveform: paramsRaw.waveform,
+        tune: Number(paramsRaw.tune),
+        cutoff: Number(paramsRaw.cutoff),
+        resonance: Number(paramsRaw.resonance),
+        envMod: Number(paramsRaw.envMod),
+        decay: Number(paramsRaw.decay),
+        accent: Number(paramsRaw.accent),
+        volume: Number(paramsRaw.volume),
+        delayTime: Number(paramsRaw.delayTime),
+        delayFeedback: Number(paramsRaw.delayFeedback),
+        delayMix: Number(paramsRaw.delayMix),
+      };
+      if (Object.values(params).some((v) => (typeof v === "number" ? !Number.isFinite(v) : false))) {
+        throw new Error(`Line ${lineIndex + 1} params contain invalid numbers.`);
+      }
+
+      const steps: Step[] = lineObj.steps.map((stepRaw, stepIndex) => {
+        if (!stepRaw || typeof stepRaw !== "object") throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} is invalid.`);
+        const step = stepRaw as Record<string, unknown>;
+        if (step.timeMode !== "note" && step.timeMode !== "tie" && step.timeMode !== "rest") {
+          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} has invalid timeMode.`);
+        }
+        if (step.transpose !== "none" && step.transpose !== "down" && step.transpose !== "up") {
+          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} has invalid transpose.`);
+        }
+        if (typeof step.accent !== "boolean" || typeof step.slide !== "boolean") {
+          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} has invalid flags.`);
+        }
+        const pitch = step.pitch === null ? null : isPitchName(step.pitch) ? step.pitch : null;
+        if (step.timeMode === "note" && !pitch) {
+          throw new Error(`Line ${lineIndex + 1}, step ${stepIndex + 1} note step must have a valid pitch.`);
+        }
+        return {
+          pitch,
+          timeMode: step.timeMode,
+          accent: step.accent,
+          slide: step.slide,
+          transpose: step.transpose,
+        };
+      });
+
+      return { steps, params };
+    });
+
+    return {
+      version: 1,
+      programName: data.programName,
+      lineCount: data.lineCount,
+      patternLength: data.patternLength,
+      tempo: data.tempo,
+      selectedLine: data.selectedLine,
+      lines: normalizedLines,
+    };
+  };
+
+  const importProjectJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const parsed = validateProjectData(JSON.parse(text));
+      setProgramName(parsed.programName);
+      setLineCount(parsed.lineCount);
+      setPatternLength(parsed.patternLength);
+      setTempo(parsed.tempo);
+      setSelectedLine(parsed.selectedLine);
+      setLines(parsed.lines);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid project JSON.";
+      window.alert(`Import failed: ${message}`);
+    } finally {
+      event.currentTarget.value = "";
+    }
   };
 
   useEffect(() => {
     const url = buildExportDataUrl();
     if (url) setExportPreviewUrl(url);
-  }, [lines, patternLength, selectedLine, tempo]);
+  }, [lines, patternLength, selectedLine, tempo, programName]);
 
   const params = lines[selectedLine].params;
 
   return (
     <main className="app">
       <header className="panel header-panel">
-        <h1>TB-303 Companion</h1>
-        <p>Pitch editor + per-step lanes + TB-303 style sheet.</p>
+        <div className="header-row">
+          <h1>TB-303 Companion</h1>
+          <div className="header-actions">
+            <label className="header-small">
+              Lines
+              <select value={lineCount} onChange={(e) => setLineCount(Number(e.currentTarget.value) as 2 | 3)}>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
+            </label>
+            <label className="header-small">
+              Length
+              <input
+                type="number"
+                min={4}
+                max={16}
+                value={patternLength}
+                onChange={(e) => setPatternLength(Math.max(4, Math.min(16, Number(e.currentTarget.value))))}
+              />
+            </label>
+            <label className="header-program">
+              Program
+              <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
+            </label>
+            <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
+            <button onClick={() => setPlayhead(-1)}>Reset</button>
+            <button onClick={exportProjectJson}>Export JSON</button>
+            <button onClick={() => importRef.current?.click()}>Import JSON</button>
+            <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
+          </div>
+        </div>
       </header>
 
       <div className="workspace">
         <section className="panel hardware-panel">
           <div className="top-controls">
             <div className="transport">
-              <label>
-                Lines
-                <select value={lineCount} onChange={(e) => setLineCount(Number(e.currentTarget.value) as 2 | 3)}>
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
-                </select>
-              </label>
-              <label>
-                Length
-                <input
-                  type="number"
-                  min={4}
-                  max={16}
-                  value={patternLength}
-                  onChange={(e) => setPatternLength(Math.max(4, Math.min(16, Number(e.currentTarget.value))))}
-                />
-              </label>
               {Array.from({ length: lineCount }, (_, i) => (
                 <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
                   LINE {i + 1}
@@ -533,8 +691,24 @@ function App() {
                   <option value="square">Square</option>
                 </select>
               </label>
-              <button onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? "Stop" : "Play"}</button>
-              <button onClick={() => setPlayhead(-1)}>Reset</button>
+              <div className="view-toggle" role="tablist" aria-label="Workspace view">
+                <button
+                  role="tab"
+                  aria-selected={workspaceView === "editor"}
+                  className={workspaceView === "editor" ? "selected" : ""}
+                  onClick={() => setWorkspaceView("editor")}
+                >
+                  Editor
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={workspaceView === "sheet"}
+                  className={workspaceView === "sheet" ? "selected" : ""}
+                  onClick={() => setWorkspaceView("sheet")}
+                >
+                  Sheet
+                </button>
+              </div>
             </div>
           </div>
 
@@ -560,7 +734,10 @@ function App() {
         </section>
 
         <div className="editor-sheet-row">
-          <section className="panel roll-panel">
+          <section
+            className={`panel roll-panel workspace-pane ${workspaceView === "editor" ? "active" : "inactive"}`}
+            style={{ "--step-count": patternLength } as React.CSSProperties}
+          >
             <h2>Pitch Editor</h2>
             <div className="roll-header">
               <div className="pitch-col">Pitch</div>
@@ -659,8 +836,7 @@ function App() {
             </div>
           </section>
 
-          <section className="panel preview-panel">
-            <h2>Visual Pattern Sheet (TB-303 style)</h2>
+          <section className={`panel preview-panel workspace-pane ${workspaceView === "sheet" ? "active" : "inactive"}`}>
             <div className="preview-actions">
               <button onClick={generateExportPreview}>Refresh</button>
               <button onClick={savePreviewPng} disabled={!exportPreviewUrl}>
