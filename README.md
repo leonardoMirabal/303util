@@ -1,7 +1,16 @@
-# Tauri + React + Typescript
+# TB-303 Companion
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+## Google Drive backup sync
 
-## Recommended IDE Setup
+The app now supports frictionless Google Drive backup/restore (after one-time app setup):
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+1. Add a Google OAuth Web Client ID in your environment:
+   - `VITE_GOOGLE_CLIENT_ID=...`
+2. Start the app and open `Menu...`
+3. Click `Connect Google Drive`
+
+Behavior:
+- On connect, the app checks Drive for `TB-303 Companion Backups/tb303-backup.json`
+- If Drive backup is newer, it restores that data into local IndexedDB
+- Local edits/saves continue in IndexedDB and are auto-backed up to Drive shortly after changes
+- `Backup to Google Drive now` triggers an immediate backup

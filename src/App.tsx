@@ -105,12 +105,55 @@ type FullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
 };
 
+type DriveBackupPayload = {
+  version: 1;
+  exportedAt: number;
+  latestUpdatedAt: number;
+  selectedLibraryId: string;
+  selectedPatternId: string;
+  libraries: LibraryRecord[];
+  patterns: PatternRecord[];
+};
+
+type GoogleTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  error?: string;
+};
+
+type GoogleTokenClient = {
+  requestAccessToken: (options?: { prompt?: "" | "consent" }) => void;
+};
+
+type GoogleTokenClientConfig = {
+  client_id: string;
+  scope: string;
+  callback: (response: GoogleTokenResponse) => void;
+};
+
+type GoogleIdentityWindow = Window & {
+  google?: {
+    accounts?: {
+      oauth2?: {
+        initTokenClient: (config: GoogleTokenClientConfig) => GoogleTokenClient;
+      };
+    };
+  };
+};
+
 const DB_NAME = "tb303-local-db";
 const DB_VERSION = 1;
 const LIBRARIES_STORE = "libraries";
 const PATTERNS_STORE = "patterns";
 const LAST_LIBRARY_ID_KEY = "tb303:last-library-id";
 const LAST_PATTERN_ID_KEY = "tb303:last-pattern-id";
+const GOOGLE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_SCRIPT_URL = "https://accounts.google.com/gsi/client";
+const DRIVE_BACKUP_FOLDER_NAME = "TB-303 Companion Backups";
+const DRIVE_BACKUP_FILE_NAME = "tb303-backup.json";
+const GOOGLE_SYNC_ENABLED_KEY = "tb303:google-sync-enabled";
+
+let googleScriptPromise: Promise<void> | null = null;
 
 const defaultParams = (): VoiceParams => ({
   waveform: "sawtooth",
@@ -314,6 +357,36 @@ const mapLegacyPatternLength = (raw: unknown): number => {
   return Math.max(4, Math.min(16, raw));
 };
 
+const loadGoogleScript = (): Promise<void> => {
+  if (googleScriptPromise) return googleScriptPromise;
+  googleScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${GOOGLE_SCRIPT_URL}"]`);
+    if (existing) {
+      if ((window as GoogleIdentityWindow).google?.accounts?.oauth2) {
+        resolve();
+        return;
+      }
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google Identity script.")), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = GOOGLE_SCRIPT_URL;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google Identity script."));
+    document.head.appendChild(script);
+  });
+  return googleScriptPromise;
+};
+
+const getLatestUpdatedAt = (libraries: LibraryRecord[], patterns: PatternRecord[]): number => {
+  const latestLibrary = libraries.reduce((max, library) => Math.max(max, library.updatedAt), 0);
+  const latestPattern = patterns.reduce((max, pattern) => Math.max(max, pattern.updatedAt), 0);
+  return Math.max(latestLibrary, latestPattern);
+};
+
 function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
@@ -339,6 +412,9 @@ function App() {
     () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches),
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [googleSyncStatus, setGoogleSyncStatus] = useState<"idle" | "connecting" | "syncing" | "ready">("idle");
+  const [googleSyncMessage, setGoogleSyncMessage] = useState("");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -350,6 +426,11 @@ function App() {
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
   const restoredPatternRef = useRef(false);
+  const googleSyncEnabledRef = useRef(false);
+  const hasLoadedLocalDataRef = useRef(false);
+  const isApplyingDriveBackupRef = useRef(false);
+  const lastDriveBackupSignatureRef = useRef("");
+  const driveBackupTimerRef = useRef<number | null>(null);
 
   const buildProjectSnapshot = (): ProjectData => ({
     version: 1,
@@ -359,6 +440,33 @@ function App() {
     selectedLine,
     lines,
   });
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? "";
+
+  const buildDriveSignature = (payload: DriveBackupPayload): string =>
+    `${payload.latestUpdatedAt}|${payload.selectedLibraryId}|${payload.selectedPatternId}|${payload.libraries.length}|${payload.patterns.length}`;
+
+  const requestGoogleAccessToken = async (prompt: "" | "consent"): Promise<string> => {
+    if (!googleClientId) {
+      throw new Error("Google sync is not configured. Missing VITE_GOOGLE_CLIENT_ID.");
+    }
+    await loadGoogleScript();
+    const googleIdentity = (window as GoogleIdentityWindow).google?.accounts?.oauth2;
+    if (!googleIdentity) throw new Error("Google Identity API did not load.");
+    return await new Promise<string>((resolve, reject) => {
+      const tokenClient = googleIdentity.initTokenClient({
+        client_id: googleClientId,
+        scope: GOOGLE_SCOPE,
+        callback: (response) => {
+          if (response.error || !response.access_token) {
+            reject(new Error(response.error || "Failed to get Google access token."));
+            return;
+          }
+          resolve(response.access_token);
+        },
+      });
+      tokenClient.requestAccessToken({ prompt });
+    });
+  };
 
   const ensureAudio = (lineIndex?: number) => {
     const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -604,6 +712,7 @@ function App() {
     void (async () => {
       await ensureDefaultLibrary();
       await refreshLocalStorageData();
+      hasLoadedLocalDataRef.current = true;
     })();
   }, []);
   useEffect(() => {
@@ -651,6 +760,39 @@ function App() {
     loadPattern(selectedPattern);
     restoredPatternRef.current = true;
   }, [patterns]);
+  useEffect(() => {
+    if (!googleClientId) return;
+    const wantsGoogleSync = window.localStorage.getItem(GOOGLE_SYNC_ENABLED_KEY) === "1";
+    if (!wantsGoogleSync || googleSyncEnabledRef.current) return;
+    void connectGoogleDrive();
+  }, [googleClientId]);
+  useEffect(() => {
+    if (!googleAccessToken) return;
+    if (!hasLoadedLocalDataRef.current) return;
+    if (isApplyingDriveBackupRef.current) return;
+    if (driveBackupTimerRef.current !== null) {
+      window.clearTimeout(driveBackupTimerRef.current);
+    }
+    driveBackupTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          setGoogleSyncStatus("syncing");
+          await pushBackupToDrive(googleAccessToken);
+          setGoogleSyncStatus("ready");
+        } catch (error) {
+          setGoogleSyncStatus("idle");
+          const message = error instanceof Error ? error.message : "Could not upload backup.";
+          setGoogleSyncMessage(message);
+        }
+      })();
+    }, 1200);
+    return () => {
+      if (driveBackupTimerRef.current !== null) {
+        window.clearTimeout(driveBackupTimerRef.current);
+        driveBackupTimerRef.current = null;
+      }
+    };
+  }, [googleAccessToken, libraries, patterns, selectedLibraryId, selectedPatternId]);
   useEffect(() => {
     if (!isPlaying) return;
     if (timerRef.current !== null) {
@@ -928,6 +1070,249 @@ function App() {
     }
   };
 
+  const buildDriveBackupPayload = (): DriveBackupPayload => ({
+    version: 1,
+    exportedAt: Date.now(),
+    latestUpdatedAt: getLatestUpdatedAt(libraries, patterns),
+    selectedLibraryId,
+    selectedPatternId,
+    libraries,
+    patterns,
+  });
+
+  const validateDriveBackupPayload = (raw: unknown): DriveBackupPayload => {
+    if (!raw || typeof raw !== "object") throw new Error("Invalid backup JSON.");
+    const record = raw as Record<string, unknown>;
+    if (record.version !== 1) throw new Error("Unsupported backup version.");
+    if (!Array.isArray(record.libraries) || !Array.isArray(record.patterns)) throw new Error("Backup content is missing libraries or patterns.");
+
+    const libraryList = (record.libraries as unknown[]).map((entry) => {
+      if (!entry || typeof entry !== "object") throw new Error("Invalid library entry.");
+      const lib = entry as Record<string, unknown>;
+      if (typeof lib.id !== "string" || typeof lib.name !== "string") throw new Error("Invalid library fields.");
+      const createdAt = Number(lib.createdAt);
+      const updatedAt = Number(lib.updatedAt);
+      if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) throw new Error("Invalid library timestamps.");
+      return { id: lib.id, name: lib.name, createdAt, updatedAt } satisfies LibraryRecord;
+    });
+
+    const patternList = (record.patterns as unknown[]).map((entry) => {
+      if (!entry || typeof entry !== "object") throw new Error("Invalid pattern entry.");
+      const pattern = entry as Record<string, unknown>;
+      if (typeof pattern.id !== "string" || typeof pattern.libraryId !== "string" || typeof pattern.name !== "string") {
+        throw new Error("Invalid pattern identifiers.");
+      }
+      const createdAt = Number(pattern.createdAt);
+      const updatedAt = Number(pattern.updatedAt);
+      if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) throw new Error("Invalid pattern timestamps.");
+      const project = validateProjectData(pattern.project);
+      return { id: pattern.id, libraryId: pattern.libraryId, name: pattern.name, project, createdAt, updatedAt } satisfies PatternRecord;
+    });
+
+    if (!libraryList.some((library) => library.id === "default")) {
+      const now = Date.now();
+      libraryList.push({ id: "default", name: "Default Library", createdAt: now, updatedAt: now });
+    }
+
+    const selectedLibrary = typeof record.selectedLibraryId === "string" ? record.selectedLibraryId : "default";
+    const selectedPattern = typeof record.selectedPatternId === "string" ? record.selectedPatternId : "";
+    const latestUpdatedAt =
+      typeof record.latestUpdatedAt === "number" && Number.isFinite(record.latestUpdatedAt)
+        ? record.latestUpdatedAt
+        : getLatestUpdatedAt(libraryList, patternList);
+    const exportedAt = typeof record.exportedAt === "number" && Number.isFinite(record.exportedAt) ? record.exportedAt : Date.now();
+
+    return {
+      version: 1,
+      exportedAt,
+      latestUpdatedAt,
+      selectedLibraryId: selectedLibrary,
+      selectedPatternId: selectedPattern,
+      libraries: libraryList,
+      patterns: patternList,
+    };
+  };
+
+  const fetchDrive = async (token: string, url: string, init?: RequestInit): Promise<Response> => {
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init?.headers ?? {}),
+      },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Google Drive request failed (${response.status}): ${text || response.statusText}`);
+    }
+    return response;
+  };
+
+  const ensureDriveBackupFolder = async (token: string): Promise<string> => {
+    const query = encodeURIComponent(
+      `name='${DRIVE_BACKUP_FOLDER_NAME.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    );
+    const listResponse = await fetchDrive(
+      token,
+      `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=drive&fields=files(id,name)&pageSize=1`,
+    );
+    const listed = (await listResponse.json()) as { files?: Array<{ id: string }> };
+    const existing = listed.files?.[0];
+    if (existing?.id) return existing.id;
+
+    const createResponse = await fetchDrive(token, "https://www.googleapis.com/drive/v3/files", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: DRIVE_BACKUP_FOLDER_NAME,
+        mimeType: "application/vnd.google-apps.folder",
+      }),
+    });
+    const created = (await createResponse.json()) as { id?: string };
+    if (!created.id) throw new Error("Could not create Google Drive backup folder.");
+    return created.id;
+  };
+
+  const findDriveBackupFile = async (token: string, folderId: string): Promise<string | null> => {
+    const query = encodeURIComponent(
+      `name='${DRIVE_BACKUP_FILE_NAME.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed=false`,
+    );
+    const response = await fetchDrive(
+      token,
+      `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=drive&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=1`,
+    );
+    const parsed = (await response.json()) as { files?: Array<{ id: string }> };
+    return parsed.files?.[0]?.id ?? null;
+  };
+
+  const uploadDriveBackup = async (token: string, payload: DriveBackupPayload): Promise<void> => {
+    const folderId = await ensureDriveBackupFolder(token);
+    const fileId = await findDriveBackupFile(token, folderId);
+    const metadata = fileId
+      ? { name: DRIVE_BACKUP_FILE_NAME }
+      : { name: DRIVE_BACKUP_FILE_NAME, parents: [folderId] };
+    const multipartBoundary = `tb303-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const body = [
+      `--${multipartBoundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify(metadata),
+      `--${multipartBoundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify(payload),
+      `--${multipartBoundary}--`,
+      "",
+    ].join("\r\n");
+
+    const endpoint = fileId
+      ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+      : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+    await fetchDrive(token, endpoint, {
+      method: fileId ? "PATCH" : "POST",
+      headers: {
+        "Content-Type": `multipart/related; boundary=${multipartBoundary}`,
+      },
+      body,
+    });
+  };
+
+  const downloadDriveBackup = async (token: string): Promise<DriveBackupPayload | null> => {
+    const folderId = await ensureDriveBackupFolder(token);
+    const fileId = await findDriveBackupFile(token, folderId);
+    if (!fileId) return null;
+    const response = await fetchDrive(token, `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    const parsed = (await response.json()) as unknown;
+    return validateDriveBackupPayload(parsed);
+  };
+
+  const applyDriveBackupToLocalDb = async (payload: DriveBackupPayload): Promise<void> => {
+    const db = await openLocalDb();
+    try {
+      await runWrite(db, [LIBRARIES_STORE, PATTERNS_STORE], (tx) => {
+        const libraryStore = tx.objectStore(LIBRARIES_STORE);
+        const patternStore = tx.objectStore(PATTERNS_STORE);
+        libraryStore.clear();
+        patternStore.clear();
+        payload.libraries.forEach((library) => libraryStore.put(library));
+        payload.patterns.forEach((pattern) => patternStore.put(pattern));
+      });
+    } finally {
+      db.close();
+    }
+    setSelectedLibraryId(payload.selectedLibraryId || "default");
+    setSelectedPatternId(payload.selectedPatternId || "");
+    await refreshLocalStorageData();
+  };
+
+  const syncFromDrive = async (token: string): Promise<void> => {
+    const drivePayload = await downloadDriveBackup(token);
+    if (!drivePayload) {
+      setGoogleSyncMessage("Connected. No Drive backup found yet.");
+      return;
+    }
+    const localLatest = getLatestUpdatedAt(libraries, patterns);
+    if (localLatest > drivePayload.latestUpdatedAt) {
+      setGoogleSyncMessage("Connected. Local data is newer than Drive backup.");
+      return;
+    }
+    isApplyingDriveBackupRef.current = true;
+    try {
+      await applyDriveBackupToLocalDb(drivePayload);
+      const signature = buildDriveSignature(drivePayload);
+      lastDriveBackupSignatureRef.current = signature;
+      setGoogleSyncMessage("Restored latest backup from Google Drive.");
+    } finally {
+      isApplyingDriveBackupRef.current = false;
+    }
+  };
+
+  const pushBackupToDrive = async (token: string): Promise<void> => {
+    const payload = buildDriveBackupPayload();
+    const signature = buildDriveSignature(payload);
+    if (signature === lastDriveBackupSignatureRef.current) return;
+    await uploadDriveBackup(token, payload);
+    lastDriveBackupSignatureRef.current = signature;
+    setGoogleSyncMessage("Backup synced to Google Drive.");
+  };
+
+  const connectGoogleDrive = async () => {
+    try {
+      setGoogleSyncStatus("connecting");
+      setGoogleSyncMessage("Connecting to Google...");
+      const token = await requestGoogleAccessToken("consent");
+      setGoogleAccessToken(token);
+      googleSyncEnabledRef.current = true;
+      window.localStorage.setItem(GOOGLE_SYNC_ENABLED_KEY, "1");
+      setGoogleSyncStatus("syncing");
+      await syncFromDrive(token);
+      setGoogleSyncStatus("ready");
+    } catch (error) {
+      googleSyncEnabledRef.current = false;
+      setGoogleSyncStatus("idle");
+      const message = error instanceof Error ? error.message : "Could not connect to Google Drive.";
+      setGoogleSyncMessage(message);
+      window.alert(`Google Drive sync failed: ${message}`);
+    }
+  };
+
+  const runDriveBackupNow = async () => {
+    if (!googleAccessToken) {
+      await connectGoogleDrive();
+      return;
+    }
+    try {
+      setGoogleSyncStatus("syncing");
+      await pushBackupToDrive(googleAccessToken);
+      setGoogleSyncStatus("ready");
+    } catch (error) {
+      setGoogleSyncStatus("idle");
+      const message = error instanceof Error ? error.message : "Could not upload backup.";
+      setGoogleSyncMessage(message);
+      window.alert(`Google Drive backup failed: ${message}`);
+    }
+  };
+
   const refreshLocalStorageData = async () => {
     const db = await openLocalDb();
     try {
@@ -945,10 +1330,14 @@ function App() {
   const ensureDefaultLibrary = async () => {
     const db = await openLocalDb();
     try {
-      const now = Date.now();
       await runWrite(db, [LIBRARIES_STORE], (tx) => {
         const store = tx.objectStore(LIBRARIES_STORE);
-        store.put({ id: "default", name: "Default Library", createdAt: now, updatedAt: now } satisfies LibraryRecord);
+        const req = store.get("default");
+        req.onsuccess = () => {
+          if (req.result) return;
+          const now = Date.now();
+          store.put({ id: "default", name: "Default Library", createdAt: now, updatedAt: now } satisfies LibraryRecord);
+        };
       });
     } finally {
       db.close();
@@ -1213,6 +1602,14 @@ function App() {
       await saveSelectedPattern();
       return;
     }
+    if (action === "google-drive-connect") {
+      await connectGoogleDrive();
+      return;
+    }
+    if (action === "google-drive-backup-now") {
+      await runDriveBackupNow();
+      return;
+    }
 
     const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
     const selectedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
@@ -1463,7 +1860,10 @@ function App() {
               <option value="delete-pattern">Delete Pattern</option>
               <option value="new-library">New Library</option>
               <option value="delete-library">Delete Library</option>
+              <option value="google-drive-connect">Connect Google Drive</option>
+              <option value="google-drive-backup-now">Backup to Google Drive now</option>
             </select>
+            {googleSyncMessage ? <span className={`google-sync-status ${googleSyncStatus}`}>{googleSyncMessage}</span> : null}
           </div>
         </div>
       </header>
