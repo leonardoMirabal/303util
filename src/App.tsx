@@ -764,7 +764,7 @@ function App() {
     if (!googleClientId) return;
     const wantsGoogleSync = window.localStorage.getItem(GOOGLE_SYNC_ENABLED_KEY) === "1";
     if (!wantsGoogleSync || googleSyncEnabledRef.current) return;
-    void connectGoogleDrive();
+    void connectGoogleDrive(false);
   }, [googleClientId]);
   useEffect(() => {
     if (!googleAccessToken) return;
@@ -1276,11 +1276,11 @@ function App() {
     setGoogleSyncMessage("Backup synced to Google Drive.");
   };
 
-  const connectGoogleDrive = async () => {
+  const connectGoogleDrive = async (interactive = true) => {
     try {
       setGoogleSyncStatus("connecting");
       setGoogleSyncMessage("Connecting to Google...");
-      const token = await requestGoogleAccessToken("consent");
+      const token = await requestGoogleAccessToken(interactive ? "consent" : "");
       setGoogleAccessToken(token);
       googleSyncEnabledRef.current = true;
       window.localStorage.setItem(GOOGLE_SYNC_ENABLED_KEY, "1");
@@ -1292,13 +1292,15 @@ function App() {
       setGoogleSyncStatus("idle");
       const message = error instanceof Error ? error.message : "Could not connect to Google Drive.";
       setGoogleSyncMessage(message);
-      window.alert(`Google Drive sync failed: ${message}`);
+      if (interactive) {
+        window.alert(`Google Drive sync failed: ${message}`);
+      }
     }
   };
 
   const runDriveBackupNow = async () => {
     if (!googleAccessToken) {
-      await connectGoogleDrive();
+      await connectGoogleDrive(true);
       return;
     }
     try {
@@ -1603,7 +1605,7 @@ function App() {
       return;
     }
     if (action === "google-drive-connect") {
-      await connectGoogleDrive();
+      await connectGoogleDrive(true);
       return;
     }
     if (action === "google-drive-backup-now") {
@@ -1687,7 +1689,7 @@ function App() {
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const shouldShowRotateOverlay =
     typeof window !== "undefined" &&
-    window.matchMedia("(max-width: 860px) and (orientation: portrait)").matches;
+    window.matchMedia("(max-width: 980px) and (orientation: portrait)").matches;
   const controlsToggleLabel = mobileControlsOpen ? "Hide Controls" : "Controls";
   const projectToggleLabel = mobileProjectOpen ? "Hide Project" : "Project";
   const enterFullscreen = () => {
