@@ -906,13 +906,15 @@ function App() {
   }, [lines, selectedLine, tempo, programName]);
 
   const buildExportDataUrl = () => {
+    const exportVoices = Math.max(1, Math.min(3, lineCount));
+    const voiceRows = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"] as const;
+    const voiceBlockHeight = 286;
     const canvas = document.createElement("canvas");
     canvas.width = 980;
-    canvas.height = 420;
+    canvas.height = 120 + voiceBlockHeight * exportVoices;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     const baseProgramName = programName.trim() || "Program";
-    const patternName = `${baseProgramName} - ${selectedLine + 1}`;
 
     ctx.fillStyle = "#f8f8f8";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -921,42 +923,50 @@ function App() {
 
     ctx.fillStyle = "#111";
     ctx.font = "bold 34px Arial";
-    ctx.fillText("TB-303 Pattern Chart", 24, 46);
+    ctx.fillText("TB-303 Pattern Charts", 24, 46);
     ctx.font = "13px Arial";
-    ctx.fillText(`Pattern Name: ${patternName}`, 24, 72);
-    ctx.fillText(`BPM: ${tempo}   Pattern Number: ${selectedLine + 1}`, 24, 92);
+    ctx.fillText(`Program: ${baseProgramName}`, 24, 72);
+    ctx.fillText(`BPM: ${tempo}   Voices exported: ${exportVoices}`, 24, 92);
 
-    const active = lines[selectedLine].steps.slice(0, lines[selectedLine].patternLength);
     const left = 24;
-    const top = 110;
     const rowHeight = 30;
     const labelWidth = 110;
-    const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / lines[selectedLine].patternLength);
-    const rows = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"];
 
-    rows.forEach((row, r) => {
-      const y = top + r * rowHeight;
-      ctx.strokeRect(left, y, labelWidth, rowHeight);
-      ctx.fillText(row, left + 8, y + 20);
-      for (let i = 0; i < lines[selectedLine].patternLength; i += 1) {
-        const x = left + labelWidth + i * colWidth;
-        ctx.strokeRect(x, y, colWidth, rowHeight);
-        const step = active[i];
-        let value = "";
-        if (row === "STEP") value = String(i + 1);
-        if (row === "NOTE") {
-          if (step.timeMode === "rest") value = "";
-          else if (step.timeMode === "tie") value = "~";
-          else value = shortNote(step.pitch);
+    for (let voiceIndex = 0; voiceIndex < exportVoices; voiceIndex += 1) {
+      const voice = lines[voiceIndex];
+      const voiceTop = 120 + voiceIndex * voiceBlockHeight;
+      const voiceLength = clampPatternLength(voice.patternLength, patternTimingMode);
+      const active = voice.steps.slice(0, voiceLength);
+      const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / voiceLength);
+
+      ctx.font = "bold 16px Arial";
+      ctx.fillText(`VOICE ${voiceIndex + 1}`, left, voiceTop - 8);
+      ctx.font = "13px Arial";
+
+      voiceRows.forEach((row, r) => {
+        const y = voiceTop + r * rowHeight;
+        ctx.strokeRect(left, y, labelWidth, rowHeight);
+        ctx.fillText(row, left + 8, y + 20);
+        for (let i = 0; i < voiceLength; i += 1) {
+          const x = left + labelWidth + i * colWidth;
+          ctx.strokeRect(x, y, colWidth, rowHeight);
+          const step = active[i];
+          let value = "";
+          if (row === "STEP") value = String(i + 1);
+          if (row === "NOTE") {
+            if (step.timeMode === "rest") value = "";
+            else if (step.timeMode === "tie") value = "~";
+            else value = shortNote(step.pitch);
+          }
+          if (row === "DOWN") value = step.transpose === "down" ? "x" : "";
+          if (row === "UP") value = step.transpose === "up" ? "x" : "";
+          if (row === "ACC") value = step.accent ? "x" : "";
+          if (row === "SLIDE") value = step.slide ? "x" : "";
+          if (row === "TIME") value = step.timeMode === "note" ? "𝅘𝅥𝅯" : step.timeMode === "tie" ? "⁀𝅘𝅥𝅯" : "";
+          if (value) ctx.fillText(value, x + 8, y + 20);
         }
-        if (row === "DOWN") value = step.transpose === "down" ? "x" : "";
-        if (row === "UP") value = step.transpose === "up" ? "x" : "";
-        if (row === "ACC") value = step.accent ? "x" : "";
-        if (row === "SLIDE") value = step.slide ? "x" : "";
-        if (row === "TIME") value = step.timeMode === "note" ? "𝅘𝅥𝅯" : step.timeMode === "tie" ? "⁀𝅘𝅥𝅯" : "";
-        if (value) ctx.fillText(value, x + 8, y + 20);
-      }
-    });
+      });
+    }
     return canvas.toDataURL("image/png");
   };
 
@@ -973,7 +983,7 @@ function App() {
       .replace(/^-+|-+$/g, "");
     const link = document.createElement("a");
     link.href = exportPreviewUrl;
-    link.download = `tb303-${safeProgramName || "program"}-voice-${selectedLine + 1}-${Date.now()}.png`;
+    link.download = `tb303-${safeProgramName || "program"}-${lineCount}voice-sheet-${Date.now()}.png`;
     link.click();
   };
 
