@@ -20,6 +20,7 @@ const DELAY_SUBDIVISIONS = [
 type PitchName = (typeof PITCHES)[number];
 type TimeMode = "note" | "tie" | "rest";
 type Transpose = "none" | "down" | "up";
+type PatternTimingMode = "normal" | "triplet";
 type DelaySubdivision = (typeof DELAY_SUBDIVISIONS)[number]["value"];
 
 type Step = {
@@ -74,6 +75,7 @@ type ProjectData = {
   version: 1;
   programName: string;
   lineCount: 1 | 2 | 3;
+  patternTimingMode: PatternTimingMode;
   patternLength?: number;
   tempo: number;
   selectedLine: number;
@@ -209,6 +211,7 @@ const resetProjectState = () => ({
   lineCount: 1 as 1 | 2 | 3,
   tempo: 126,
   programName: "Program",
+  patternTimingMode: "normal" as PatternTimingMode,
   selectedLine: 0,
   lines: defaultProjectLines(),
 });
@@ -357,6 +360,10 @@ const mapLegacyPatternLength = (raw: unknown): number => {
   return Math.max(4, Math.min(16, raw));
 };
 
+const maxPatternLengthForMode = (mode: PatternTimingMode): number => (mode === "triplet" ? 12 : 16);
+
+const clampPatternLength = (length: number, mode: PatternTimingMode): number => Math.max(4, Math.min(maxPatternLengthForMode(mode), length));
+
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
   googleScriptPromise = new Promise((resolve, reject) => {
@@ -391,6 +398,7 @@ function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
+  const [patternTimingMode, setPatternTimingMode] = useState<PatternTimingMode>(DEFAULT_PROJECT_STATE.patternTimingMode);
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
   const [lines, setLines] = useState<LineState[]>(() => DEFAULT_PROJECT_STATE.lines);
   const [selectedLine, setSelectedLine] = useState(DEFAULT_PROJECT_STATE.selectedLine);
@@ -425,6 +433,7 @@ function App() {
   const lineFxRef = useRef<Array<LineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
+  const patternTimingModeRef = useRef(patternTimingMode);
   const restoredPatternRef = useRef(false);
   const googleSyncEnabledRef = useRef(false);
   const hasLoadedLocalDataRef = useRef(false);
@@ -436,6 +445,7 @@ function App() {
     version: 1,
     programName,
     lineCount,
+    patternTimingMode,
     tempo,
     selectedLine,
     lines,
@@ -618,8 +628,25 @@ function App() {
   };
 
   const updateVoicePatternLength = (value: number) => {
-    const nextLength = Math.max(4, Math.min(16, value));
+    const nextLength = clampPatternLength(value, patternTimingMode);
     setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
+  };
+
+  const applyPatternTimingMode = (mode: PatternTimingMode) => {
+    if (mode === patternTimingMode) return;
+    setPatternTimingMode(mode);
+    setLines((prev) =>
+      prev.map((line) => ({
+        ...line,
+        patternLength: clampPatternLength(line.patternLength, mode),
+      })),
+    );
+    setPlayhead(-1);
+    stepRef.current = 0;
+  };
+
+  const togglePatternTimingMode = () => {
+    applyPatternTimingMode(patternTimingMode === "normal" ? "triplet" : "normal");
   };
 
   const playStep = (lineIndex: number, line: LineState, stepIndex: number, stepLenSeconds: number) => {
@@ -705,6 +732,9 @@ function App() {
   useEffect(() => {
     lineCountRef.current = lineCount;
   }, [lineCount]);
+  useEffect(() => {
+    patternTimingModeRef.current = patternTimingMode;
+  }, [patternTimingMode]);
   useEffect(() => {
     setSelectedLine((prev) => Math.min(prev, lineCount - 1));
   }, [lineCount]);
@@ -800,16 +830,16 @@ function App() {
       timerRef.current = null;
     }
 
-    const stepMs = (60 / tempo) * 250;
+    const stepMs = patternTimingModeRef.current === "triplet" ? (60 / tempo) * (1000 / 3) : (60 / tempo) * 250;
     const stepSec = stepMs / 1000;
     const tick = () => {
       const step = stepRef.current;
       const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
-        const voiceLength = Math.max(4, Math.min(16, linesNow[li].patternLength));
+        const voiceLength = clampPatternLength(linesNow[li].patternLength, patternTimingModeRef.current);
         playStep(li, linesNow[li], step % voiceLength, stepSec);
       }
-      const selectedVoiceLength = Math.max(4, Math.min(16, linesNow[selectedLine]?.patternLength ?? 8));
+      const selectedVoiceLength = clampPatternLength(linesNow[selectedLine]?.patternLength ?? 8, patternTimingModeRef.current);
       setPlayhead(step % selectedVoiceLength);
       stepRef.current = step + 1;
     };
@@ -821,7 +851,7 @@ function App() {
         timerRef.current = null;
       }
     };
-  }, [isPlaying, tempo, selectedLine]);
+  }, [isPlaying, tempo, selectedLine, patternTimingMode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -969,6 +999,8 @@ function App() {
     if (data.version !== 1) throw new Error("Unsupported JSON version.");
     if (typeof data.programName !== "string") throw new Error("programName must be a string.");
     if (data.lineCount !== 1 && data.lineCount !== 2 && data.lineCount !== 3) throw new Error("voiceCount must be 1, 2, or 3.");
+    const patternTimingMode: PatternTimingMode =
+      data.patternTimingMode === "triplet" || data.patternTimingMode === "normal" ? data.patternTimingMode : "normal";
     if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
     if (typeof data.selectedLine !== "number" || !Number.isInteger(data.selectedLine)) throw new Error("selectedLine must be an integer.");
     if (data.selectedLine < 0 || data.selectedLine >= MAX_LINES) throw new Error("selectedLine is out of range.");
@@ -986,8 +1018,8 @@ function App() {
       if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Voice ${lineIndex + 1} params are invalid.`);
       const fallbackLength = mapLegacyPatternLength(data.patternLength);
       const patternLength = typeof lineObj.patternLength === "number" ? lineObj.patternLength : fallbackLength;
-      if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > 16) {
-        throw new Error(`Voice ${lineIndex + 1} patternLength must be between 4 and 16.`);
+      if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > maxPatternLengthForMode(patternTimingMode)) {
+        throw new Error(`Voice ${lineIndex + 1} patternLength must be between 4 and ${maxPatternLengthForMode(patternTimingMode)}.`);
       }
       const paramsRaw = lineObj.params as Record<string, unknown>;
       if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`Voice ${lineIndex + 1} waveform is invalid.`);
@@ -1038,13 +1070,14 @@ function App() {
         };
       });
 
-      return { patternLength, steps, params };
+      return { patternLength: clampPatternLength(patternLength, patternTimingMode), steps, params };
     });
 
     return {
       version: 1,
       programName: data.programName,
       lineCount: data.lineCount,
+      patternTimingMode,
       tempo: data.tempo,
       selectedLine: Math.min(data.selectedLine, data.lineCount - 1),
       lines: normalizedLines,
@@ -1059,6 +1092,7 @@ function App() {
       const parsed = validateProjectData(JSON.parse(text));
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
+      setPatternTimingMode(parsed.patternTimingMode);
       setTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
@@ -1436,14 +1470,16 @@ function App() {
     const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const targetLibraryId = selectedLibraryId;
     const baseVoiceLength = lines[selectedLine]?.patternLength ?? 8;
+    const defaultTimingMode: PatternTimingMode = "normal";
     const emptyProject: ProjectData = {
       version: 1,
       programName: trimmed,
       lineCount,
+      patternTimingMode: defaultTimingMode,
       tempo,
       selectedLine: 0,
       lines: Array.from({ length: MAX_LINES }, () => ({
-        patternLength: baseVoiceLength,
+        patternLength: clampPatternLength(baseVoiceLength, defaultTimingMode),
         steps: Array.from({ length: STEPS }, () => ({
           pitch: null,
           timeMode: "rest",
@@ -1491,14 +1527,16 @@ function App() {
 
   const openUnsavedEmptyPattern = () => {
     const baseVoiceLength = lines[selectedLine]?.patternLength ?? 8;
+    const defaultTimingMode: PatternTimingMode = "normal";
     const emptyProject: ProjectData = {
       version: 1,
       programName: "Untitled",
       lineCount,
+      patternTimingMode: defaultTimingMode,
       tempo,
       selectedLine: 0,
       lines: Array.from({ length: MAX_LINES }, () => ({
-        patternLength: baseVoiceLength,
+        patternLength: clampPatternLength(baseVoiceLength, defaultTimingMode),
         steps: Array.from({ length: STEPS }, () => ({
           pitch: null,
           timeMode: "rest",
@@ -1530,6 +1568,7 @@ function App() {
       setWorkspaceView("editor");
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
+      setPatternTimingMode(parsed.patternTimingMode);
       setTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
@@ -1577,6 +1616,43 @@ function App() {
 
   const runStorageAction = async (action: string) => {
     if (!action) return;
+    if (action === "set-voices") {
+      const value = window.prompt("Voices (1-3)", String(lineCount));
+      if (value === null) return;
+      const parsed = Number(value);
+      if (parsed !== 1 && parsed !== 2 && parsed !== 3) {
+        window.alert("Voices must be 1, 2, or 3.");
+        return;
+      }
+      setLineCount(parsed);
+      return;
+    }
+    if (action === "set-length") {
+      const maxLength = maxPatternLengthForMode(patternTimingMode);
+      const value = window.prompt(`Length (4-${maxLength})`, String(patternLength));
+      if (value === null) return;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {
+        window.alert("Length must be a number.");
+        return;
+      }
+      updateVoicePatternLength(parsed);
+      return;
+    }
+    if (action === "set-library") {
+      const currentLibraryName = libraries.find((library) => library.id === selectedLibraryId)?.name ?? selectedLibraryId;
+      const value = window.prompt("Library name or id", currentLibraryName);
+      if (value === null) return;
+      const needle = value.trim().toLowerCase();
+      if (!needle) return;
+      const nextLibrary = libraries.find((library) => library.id.toLowerCase() === needle || library.name.toLowerCase() === needle);
+      if (!nextLibrary) {
+        window.alert("Library not found.");
+        return;
+      }
+      setSelectedLibraryId(nextLibrary.id);
+      return;
+    }
     if (action === "export-json") {
       exportProjectJson();
       return;
@@ -1602,6 +1678,10 @@ function App() {
 
     if (action === "save-pattern") {
       await saveSelectedPattern();
+      return;
+    }
+    if (action === "new-pattern") {
+      await createEmptyPattern();
       return;
     }
     if (action === "google-drive-connect") {
@@ -1685,7 +1765,7 @@ function App() {
   }, []);
 
   const params = lines[selectedLine].params;
-  const patternLength = lines[selectedLine].patternLength;
+  const patternLength = clampPatternLength(lines[selectedLine].patternLength, patternTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const shouldShowRotateOverlay =
     typeof window !== "undefined" &&
@@ -1774,61 +1854,23 @@ function App() {
               {isPlaying ? "Stop" : "Play"}
             </button>
             <button onClick={resetPattern}>Reset</button>
-            <button onClick={() => void createEmptyPattern()} title="New empty pattern">
-              +
-            </button>
             <button onClick={() => void saveSelectedPattern()}>Save</button>
-            <button
-              onClick={() => {
-                const selectedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
-                if (!selectedPattern) return;
-                const ok = window.confirm(`Delete pattern "${selectedPattern.name}"?`);
-                if (!ok) return;
-                void (async () => {
-                  await deletePattern(selectedPattern.id);
-                  openUnsavedEmptyPattern();
-                })();
-              }}
-              title="Delete selected pattern"
-              disabled={!selectedPatternId}
-            >
-              Delete
-            </button>
           </div>
           <div className={`header-actions ${isPhoneLandscape && !mobileProjectOpen ? "mobile-collapsed" : ""}`}>
-            <label className="header-small">
-              Voices
-              <select value={lineCount} onChange={(e) => setLineCount(Number(e.currentTarget.value) as 1 | 2 | 3)}>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-              </select>
-            </label>
-            <label className="header-small">
-              Length
-              <input
-                type="number"
-                min={4}
-                max={16}
-                value={patternLength}
-                onChange={(e) => updateVoicePatternLength(Number(e.currentTarget.value))}
-              />
-            </label>
+            <div className="view-toggle" role="group" aria-label="Pattern timing">
+              <button
+                type="button"
+                className={patternTimingMode === "triplet" ? "selected" : ""}
+                onClick={togglePatternTimingMode}
+              >
+                {patternTimingMode === "normal" ? "Normal" : "Triplet"}
+              </button>
+            </div>
             <label className="header-program">
               Program
               <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
             </label>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
-            <label className="header-program">
-              Library
-              <select value={selectedLibraryId} onChange={(e) => setSelectedLibraryId(e.currentTarget.value)}>
-                {libraries.map((library) => (
-                  <option key={library.id} value={library.id}>
-                    {library.name}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label className="header-program">
               Pattern
               <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
@@ -1849,8 +1891,12 @@ function App() {
               }}
             >
               <option value="menu">Menu...</option>
+              <option value="set-voices">Voices</option>
+              <option value="set-length">Length</option>
+              <option value="set-library">Library</option>
               <option value="export-json">Export JSON</option>
               <option value="import-json">Import JSON</option>
+              <option value="new-pattern">New Pattern</option>
               <option value="save-pattern">Save Pattern</option>
               <option value="delete-pattern">Delete Pattern</option>
               <option value="new-library">New Library</option>
