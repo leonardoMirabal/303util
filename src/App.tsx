@@ -411,13 +411,13 @@ function App() {
   const [selectedPatternId, setSelectedPatternId] = useState<string>(() => window.localStorage.getItem(LAST_PATTERN_ID_KEY) ?? "");
   const [storageAction, setStorageAction] = useState("menu");
   const [isPhoneLandscape, setIsPhoneLandscape] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches,
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches,
   );
   const [mobileControlsOpen, setMobileControlsOpen] = useState(
-    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches),
+    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches),
   );
   const [mobileProjectOpen, setMobileProjectOpen] = useState(
-    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px) and (orientation: landscape)").matches),
+    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches),
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
@@ -1738,7 +1738,7 @@ function App() {
   }, [lines, selectedLine, tempo, programName]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 980px) and (orientation: landscape)");
+    const mediaQuery = window.matchMedia("(max-width: 980px)");
     const syncLandscapeState = () => {
       const isLandscapePhone = mediaQuery.matches;
       setIsPhoneLandscape(isLandscapePhone);
@@ -1767,9 +1767,7 @@ function App() {
   const params = lines[selectedLine].params;
   const patternLength = clampPatternLength(lines[selectedLine].patternLength, patternTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
-  const shouldShowRotateOverlay =
-    typeof window !== "undefined" &&
-    window.matchMedia("(max-width: 980px) and (orientation: portrait)").matches;
+  const shouldShowRotateOverlay = false;
   const controlsToggleLabel = mobileControlsOpen ? "Hide Controls" : "Controls";
   const projectToggleLabel = mobileProjectOpen ? "Hide Project" : "Project";
   const enterFullscreen = () => {

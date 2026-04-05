@@ -538,7 +538,7 @@ button.selected {
   }
 }
 
-@media (max-width: 980px) and (orientation: landscape) {
+@media (max-width: 980px) {
   body {
     overflow: hidden;
   }
@@ -894,7 +894,7 @@ button.selected {
   }
 }
 
-@media (max-width: 860px) and (orientation: portrait) {
+@media (max-width: 980px) and (orientation: portrait) {
   body {
     overflow: hidden;
   }
@@ -904,12 +904,8 @@ button.selected {
     height: 100dvh;
   }
 
-  .app > *:not(.rotate-overlay) {
-    display: none;
-  }
-
   .rotate-overlay {
-    display: grid;
+    display: none;
     place-items: center;
     width: 100%;
     height: 100dvh;
