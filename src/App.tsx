@@ -862,6 +862,10 @@ function App() {
     setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
   };
 
+  const halveTempo = () => {
+    setTempo((prev) => Math.max(1, Math.round(prev / 2)));
+  };
+
   const applyPatternTimingMode = (mode: PatternTimingMode) => {
     if (mode === lines[selectedLine]?.timingMode) return;
     setLines((prev) =>
@@ -2291,8 +2295,13 @@ function App() {
               {isMobileViewport ? (
                 <>
                   <div className="leading-controls">
-                    <div className="bpm-knob-slot">
-                      <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
+                    <div className="tempo-controls">
+                      <div className="bpm-knob-slot">
+                        <KnobControl label="BPM" min={1} max={180} value={tempo} onChange={setTempo} />
+                      </div>
+                      <button type="button" className="tempo-action-button" onClick={halveTempo} aria-label="Halve BPM">
+                        1/2
+                      </button>
                     </div>
                     <div className="volume-knob-slot">
                       <KnobControl label={synthLabels.volume} min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
@@ -2354,8 +2363,13 @@ function App() {
               ) : (
                 <>
                   <div className="leading-controls desktop-leading-controls">
-                    <div className="bpm-knob-slot desktop-bpm-knob-slot">
-                      <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
+                    <div className="tempo-controls">
+                      <div className="bpm-knob-slot desktop-bpm-knob-slot">
+                        <KnobControl label="BPM" min={1} max={180} value={tempo} onChange={setTempo} />
+                      </div>
+                      <button type="button" className="tempo-action-button" onClick={halveTempo} aria-label="Halve BPM">
+                        1/2
+                      </button>
                     </div>
                     <div className="volume-knob-slot desktop-volume-knob-slot">
                       <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />

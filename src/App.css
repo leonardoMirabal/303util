@@ -316,6 +316,21 @@ button.selected {
   gap: 6px;
 }
 
+.tempo-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.tempo-action-button {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .wave-toggle {
   display: flex;
 }
@@ -534,8 +549,8 @@ button.selected {
 }
 
 .pitch-col.scale-root {
-  background: #4d421f;
-  color: #fff2be;
+  background: #4b1e1e;
+  color: #ffd4d4;
 }
 
 .step-head {
@@ -634,8 +649,8 @@ button.selected {
 }
 
 .cell.scale-root {
-  background: #29210f;
-  border-color: #736130;
+  background: #14181d;
+  border-color: #252a31;
 }
 
 .cell.note {
@@ -652,9 +667,9 @@ button.selected {
 }
 
 .cell.note.scale-root {
-  background: #f0d66c;
-  border-color: #fff3c0;
-  color: #151103;
+  background: #df6262;
+  border-color: #ffd0d0;
+  color: #220808;
 }
 
 .preview-actions {
@@ -1051,6 +1066,17 @@ button.selected {
 
   .leading-controls {
     gap: 4px;
+  }
+
+  .tempo-controls {
+    gap: 4px;
+  }
+
+  .tempo-action-button {
+    min-width: 28px;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 0.6rem;
   }
 
   .knob {
