@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import "./App.css";
 
 const STEPS = 16;
@@ -697,11 +698,21 @@ function App() {
     lines,
   });
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? "";
+  const googleDesktopClientId = (import.meta.env.VITE_GOOGLE_DESKTOP_CLIENT_ID as string | undefined)?.trim() ?? "";
 
   const buildDriveSignature = (payload: DriveBackupPayload): string =>
     `${payload.latestUpdatedAt}|${payload.selectedLibraryId}|${payload.selectedPatternId}|${payload.libraries.length}|${payload.patterns.length}`;
 
   const requestGoogleAccessToken = async (prompt: "" | "consent"): Promise<string> => {
+    if (isTauri()) {
+      if (!googleDesktopClientId) {
+        throw new Error("Google sync is not configured for the installed app. Missing VITE_GOOGLE_DESKTOP_CLIENT_ID.");
+      }
+      return await invoke<string>("desktop_google_drive_access_token", {
+        clientId: googleDesktopClientId,
+        scope: GOOGLE_SCOPE,
+      });
+    }
     if (!googleClientId) {
       throw new Error("Google sync is not configured. Missing VITE_GOOGLE_CLIENT_ID.");
     }
@@ -1053,11 +1064,12 @@ function App() {
     restoredPatternRef.current = true;
   }, [patterns]);
   useEffect(() => {
-    if (!googleClientId) return;
+    const configuredClientId = isTauri() ? googleDesktopClientId : googleClientId;
+    if (!configuredClientId) return;
     const wantsGoogleSync = window.localStorage.getItem(GOOGLE_SYNC_ENABLED_KEY) === "1";
     if (!wantsGoogleSync || googleSyncEnabledRef.current) return;
     void connectGoogleDrive(false);
-  }, [googleClientId]);
+  }, [googleClientId, googleDesktopClientId]);
   useEffect(() => {
     if (!googleAccessToken) return;
     if (!hasLoadedLocalDataRef.current) return;

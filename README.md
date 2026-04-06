@@ -365,6 +365,11 @@ Google Drive support is for backing up your saved libraries and patterns.
 
 When the connection succeeds, the app checks Google Drive for the latest backup.
 
+**Configuration note**
+
+- The browser build uses `VITE_GOOGLE_CLIENT_ID`.
+- The installed desktop app uses `VITE_GOOGLE_DESKTOP_CLIENT_ID`.
+
 ### What happens when you connect
 
 - If no backup exists yet, the app stays connected and is ready to create one.
