@@ -492,12 +492,6 @@ function App() {
   const [isMobileViewport, setIsMobileViewport] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches,
   );
-  const [isPhoneLandscape, setIsPhoneLandscape] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 980px)").matches &&
-      window.matchMedia("(orientation: landscape)").matches,
-  );
   const [mobileControlsOpen, setMobileControlsOpen] = useState(
     () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches),
   );
@@ -1065,17 +1059,23 @@ function App() {
     const url = buildExportDataUrl();
     if (url) setExportPreviewUrl(url);
   };
-  const savePreviewPng = () => {
-    if (!exportPreviewUrl) return;
+  const exportSheetPng = (urlOverride?: string) => {
+    const url = urlOverride ?? buildExportDataUrl();
+    if (!url) return;
+    setExportPreviewUrl(url);
     const baseProgramName = programName.trim() || "program";
     const safeProgramName = baseProgramName
       .toLowerCase()
       .replace(/[^a-z0-9-_]+/g, "-")
       .replace(/^-+|-+$/g, "");
     const link = document.createElement("a");
-    link.href = exportPreviewUrl;
+    link.href = url;
     link.download = `tb303-${safeProgramName || "program"}-${lineCount}voice-sheet-${Date.now()}.png`;
     link.click();
+  };
+  const savePreviewPng = () => {
+    if (!exportPreviewUrl) return;
+    exportSheetPng(exportPreviewUrl);
   };
 
   const exportProjectJson = () => {
@@ -1758,6 +1758,10 @@ function App() {
       exportProjectJson();
       return;
     }
+    if (action === "export-png") {
+      exportSheetPng();
+      return;
+    }
     if (action === "import-json") {
       importRef.current?.click();
       return;
@@ -1845,7 +1849,6 @@ function App() {
       const nextIsMobile = mobileQuery.matches;
       const nextIsPhoneLandscape = nextIsMobile && orientationQuery.matches;
       setIsMobileViewport(nextIsMobile);
-      setIsPhoneLandscape(nextIsPhoneLandscape);
       setMobileProjectOpen(!nextIsPhoneLandscape);
       setMobileControlsOpen(true);
     };
@@ -1876,9 +1879,9 @@ function App() {
   const patternLength = clampPatternLength(lines[selectedLine].patternLength, patternTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const shouldShowRotateOverlay = false;
-  const controlsToggleLabel = mobileControlsOpen ? "Hide Controls" : "Controls";
-  const projectToggleLabel = mobileProjectOpen ? "Hide Project" : "Project";
-  const modifiersToggleLabel = mobileModifiersOpen ? "Hide Mods" : "Mods";
+  const controlsToggleLabel = "Controls";
+  const projectToggleLabel = "Project";
+  const modifiersToggleLabel = "Mods";
   const patternTimingLabel = patternTimingMode === "normal" ? "♪" : "♪₃";
   const patternTimingAriaLabel = patternTimingMode === "normal" ? "Regular note timing" : "Triplet note timing";
   const synthLabels = isMobileViewport
@@ -1926,8 +1929,8 @@ function App() {
   const renderAuxControls = (extraClassName?: string) => (
     <div className={extraClassName ? `aux-controls ${extraClassName}` : "aux-controls"}>
       {Array.from({ length: lineCount }, (_, i) => (
-        <button key={i} className={selectedLine === i ? "selected" : ""} onClick={() => setSelectedLine(i)}>
-          VOICE {i + 1}
+        <button key={i} className={`voice-line-button ${selectedLine === i ? "selected" : ""}`} onClick={() => setSelectedLine(i)}>
+          {isMobileViewport ? i + 1 : `VOICE ${i + 1}`}
         </button>
       ))}
       <div className="view-toggle" role="tablist" aria-label="Workspace view">
@@ -2023,6 +2026,7 @@ function App() {
               <option value="set-length">Length</option>
               <option value="set-library">Library</option>
               <option value="export-json">Export JSON</option>
+              <option value="export-png">Export PNG</option>
               <option value="import-json">Import JSON</option>
               <option value="new-pattern">New Pattern</option>
               <option value="save-pattern">Save Pattern</option>
@@ -2045,7 +2049,7 @@ function App() {
             </button>
             <button
               type="button"
-              className="mobile-project-toggle"
+              className={mobileProjectOpen ? "mobile-project-toggle selected" : "mobile-project-toggle"}
               onClick={() => setMobileProjectOpen((open) => !open)}
               aria-expanded={mobileProjectOpen}
             >
@@ -2067,7 +2071,7 @@ function App() {
             ) : null}
             <button
               type="button"
-              className="mobile-modifiers-toggle"
+              className={mobileModifiersOpen ? "mobile-modifiers-toggle selected" : "mobile-modifiers-toggle"}
               onClick={() => setMobileModifiersOpen((open) => !open)}
               aria-expanded={mobileModifiersOpen}
               aria-controls="mobile-modifier-controls"

@@ -278,6 +278,14 @@ button.selected {
   padding: 0 9px;
 }
 
+.voice-line-button {
+  border-color: #748394;
+}
+
+.voice-line-button.selected {
+  border-color: #f3f7fb;
+}
+
 .mobile-hardware-bar,
 .mobile-controls-toggle,
 .mobile-fullscreen-toggle,
