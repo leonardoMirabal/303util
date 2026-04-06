@@ -253,35 +253,80 @@ const makeLine = (): LineState => ({
   params: defaultParams(),
 });
 
-const defaultProjectLines = (): LineState[] => {
-  const lines = Array.from({ length: MAX_LINES }, () => makeLine());
-  lines[0] = {
-    ...lines[0],
-    steps: [
-      { pitch: "C3", timeMode: "note", accent: true, slide: false, transpose: "down" },
-      { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
-      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
-      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
-      { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
-      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
-      { pitch: "D#3", timeMode: "note", accent: false, slide: true, transpose: "none" },
-      { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
-      ...Array.from({ length: 8 }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
-    ],
-    params: { ...defaultParams(), resonance: 6.4, envMod: 59 },
-  };
-  return lines;
+const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
+  version: 1,
+  programName: "pattern 1",
+  lineCount: 2,
+  patternTimingMode: "normal",
+  scalePresetId: "off",
+  scaleRoot: "C",
+  tempo: 126,
+  selectedLine: 1,
+  lines: [
+    {
+      patternLength: 8,
+      steps: [
+        { pitch: "C3", timeMode: "note", accent: true, slide: false, transpose: "down" },
+        { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
+        { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
+        { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
+        { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
+        { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
+        { pitch: "D#3", timeMode: "note", accent: false, slide: true, transpose: "none" },
+        { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
+        ...Array.from({ length: 8 }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
+      ],
+      params: {
+        waveform: "sawtooth",
+        tune: 0,
+        cutoff: 642,
+        resonance: 1.6,
+        envMod: 59,
+        decay: 0.22,
+        accent: 2.5,
+        volume: 0.26,
+        delayTime: 0.24,
+        delaySync: true,
+        delaySubdivision: "1/8.",
+        delayFeedback: 0.41,
+        delayMix: 0.51,
+        distortion: 0,
+        reverb: 0.28,
+      },
+    },
+    {
+      patternLength: 8,
+      steps: Array.from({ length: STEPS }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
+      params: {
+        waveform: "sawtooth",
+        tune: 0,
+        cutoff: 420,
+        resonance: 5.6,
+        envMod: 0,
+        decay: 0.22,
+        accent: 1.75,
+        volume: 0.26,
+        delayTime: 0.24,
+        delaySync: true,
+        delaySubdivision: "1/8",
+        delayFeedback: 0.44,
+        delayMix: 0.51,
+        distortion: 0.12,
+        reverb: 0.16,
+      },
+    },
+    {
+      patternLength: 8,
+      steps: Array.from({ length: STEPS }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
+      params: defaultParams(),
+    },
+  ],
 };
 
+const cloneProjectData = (project: ProjectData): ProjectData => JSON.parse(JSON.stringify(project)) as ProjectData;
+
 const resetProjectState = () => ({
-  lineCount: 1 as 1 | 2 | 3,
-  tempo: 126,
-  programName: "Program",
-  patternTimingMode: "normal" as PatternTimingMode,
-  scalePresetId: "off",
-  scaleRoot: "C" as PitchClass,
-  selectedLine: 0,
-  lines: defaultProjectLines(),
+  ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE),
 });
 
 const DEFAULT_PROJECT_STATE = resetProjectState();
@@ -555,8 +600,8 @@ function App() {
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
   const [patternTimingMode, setPatternTimingMode] = useState<PatternTimingMode>(DEFAULT_PROJECT_STATE.patternTimingMode);
-  const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId);
-  const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot);
+  const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId ?? "off");
+  const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot ?? "C");
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
   const [lines, setLines] = useState<LineState[]>(() => DEFAULT_PROJECT_STATE.lines);
   const [selectedLine, setSelectedLine] = useState(DEFAULT_PROJECT_STATE.selectedLine);
@@ -1657,29 +1702,7 @@ function App() {
     const now = Date.now();
     const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const targetLibraryId = selectedLibraryId;
-    const baseVoiceLength = lines[selectedLine]?.patternLength ?? 8;
-    const defaultTimingMode: PatternTimingMode = "normal";
-    const emptyProject: ProjectData = {
-      version: 1,
-      programName: trimmed,
-      lineCount,
-      patternTimingMode: defaultTimingMode,
-      scalePresetId: "off",
-      scaleRoot: "C",
-      tempo,
-      selectedLine: 0,
-      lines: Array.from({ length: MAX_LINES }, () => ({
-        patternLength: clampPatternLength(baseVoiceLength, defaultTimingMode),
-        steps: Array.from({ length: STEPS }, () => ({
-          pitch: null,
-          timeMode: "rest",
-          accent: false,
-          slide: false,
-          transpose: "none",
-        })),
-        params: defaultParams(),
-      })),
-    };
+    const emptyProject: ProjectData = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName: trimmed };
 
     const db = await openLocalDb();
     try {
@@ -1716,29 +1739,7 @@ function App() {
   };
 
   const openUnsavedEmptyPattern = () => {
-    const baseVoiceLength = lines[selectedLine]?.patternLength ?? 8;
-    const defaultTimingMode: PatternTimingMode = "normal";
-    const emptyProject: ProjectData = {
-      version: 1,
-      programName: "Untitled",
-      lineCount,
-      patternTimingMode: defaultTimingMode,
-      scalePresetId: "off",
-      scaleRoot: "C",
-      tempo,
-      selectedLine: 0,
-      lines: Array.from({ length: MAX_LINES }, () => ({
-        patternLength: clampPatternLength(baseVoiceLength, defaultTimingMode),
-        steps: Array.from({ length: STEPS }, () => ({
-          pitch: null,
-          timeMode: "rest",
-          accent: false,
-          slide: false,
-          transpose: "none",
-        })),
-        params: defaultParams(),
-      })),
-    };
+    const emptyProject: ProjectData = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName: "Untitled" };
     setSelectedPatternId("");
     loadPattern({
       id: "unsaved-empty",
@@ -1913,21 +1914,17 @@ function App() {
   };
 
   const resetPattern = () => {
+    const resetProject = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName };
     setIsPlaying(false);
     setPlayhead(-1);
     stepRef.current = 0;
-    setLines((prev) =>
-      prev.map((line) => ({
-        ...line,
-        steps: Array.from({ length: STEPS }, () => ({
-          pitch: null,
-          timeMode: "rest",
-          accent: false,
-          slide: false,
-          transpose: "none" as const,
-        })),
-      })),
-    );
+    setLineCount(resetProject.lineCount);
+    setPatternTimingMode(resetProject.patternTimingMode);
+    setScalePresetId(resetProject.scalePresetId ?? "off");
+    setScaleRoot(resetProject.scaleRoot ?? "C");
+    setTempo(resetProject.tempo);
+    setSelectedLine(resetProject.selectedLine);
+    setLines(resetProject.lines);
   };
 
   useEffect(() => {
