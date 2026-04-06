@@ -110,6 +110,22 @@ EOF
   fi
 }
 
+enforce_android_landscape() {
+  local manifest_file="${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+
+  if [ ! -f "${manifest_file}" ]; then
+    echo "Error: Android manifest not found at ${manifest_file}"
+    exit 1
+  fi
+
+  if grep -q 'android:screenOrientation=' "${manifest_file}"; then
+    perl -0pi -e 's/android:screenOrientation="[^"]*"/android:screenOrientation="sensorLandscape"/g' "${manifest_file}"
+    return
+  fi
+
+  perl -0pi -e 's/(android:name="\.MainActivity"\n)/$1            android:screenOrientation="sensorLandscape"\n/' "${manifest_file}"
+}
+
 if [ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]; then
   echo "Error: VITE_GOOGLE_CLIENT_ID is required."
   exit 1
@@ -135,6 +151,7 @@ if [ ! -d "${SCRIPT_DIR}/src-tauri/gen/android" ]; then
   npx tauri android init --ci --skip-targets-install
 fi
 
+enforce_android_landscape
 write_android_version_properties
 configure_android_signing
 npx tauri android build "${ANDROID_BUILD_ARGS[@]}"
