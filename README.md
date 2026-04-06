@@ -233,6 +233,8 @@ If you want visual note guidance:
 2. Choose a **Root**
 3. Return to the pitch grid and place notes as usual
 
+![Scale mode in the pitch editor](docs/screenshots/scale-mode.png)
+
 What you will see:
 
 - the **root note row** is highlighted in its own color
