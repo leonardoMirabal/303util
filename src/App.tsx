@@ -309,7 +309,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
         volume: 0.26,
         delayTime: 0.24,
         delaySync: true,
-        delaySubdivision: "1/8",
+        delaySubdivision: "1/8.",
         delayFeedback: 0.44,
         delayMix: 0.51,
         distortion: 0.12,
