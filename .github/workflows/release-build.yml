@@ -2,6 +2,12 @@ name: Release build
 
 on:
   push:
+    branches:
+      - main
+      - dev
+    paths-ignore:
+      - README.md
+      - docs/**
 
 permissions:
   contents: write
@@ -13,10 +19,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag_version.outputs.new_tag }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: keepbang/bump-tag-version@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WITH_V: false
+          DEFAULT_BUMP: minor
+          INITIAL_VERSION: 0.1.0
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_BRANCHES: main,dev
+          PRERELEASE: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+          PRERELEASE_SUFFIX: alpha
+          GIT_API_TAGGING: true
+          BRANCH_HISTORY: compare
+
   build:
+    needs: get-version
     runs-on: ubuntu-latest
     env:
       VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+      RELEASE_VERSION: ${{ needs.get-version.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -71,16 +104,28 @@ jobs:
         with:
           path: artifacts/web
 
-      - name: Publish rolling release
-        uses: softprops/action-gh-release@v2
+  release:
+    needs:
+      - get-version
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
         with:
-          tag_name: ci-${{ github.ref_name }}
-          name: CI build (${{ github.ref_name }})
-          prerelease: true
-          make_latest: false
-          generate_release_notes: true
-          overwrite_files: true
-          files: |
+          name: release-artifacts
+          path: artifacts
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.get-version.outputs.version }}
+          name: ${{ needs.get-version.outputs.version }}
+          prerelease: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          generateReleaseNotes: true
+          artifacts: |
             artifacts/web-bundle.zip
             artifacts/apk/*.apk
 
