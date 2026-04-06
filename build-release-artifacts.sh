@@ -10,6 +10,8 @@ RELEASE_VERSION="${RELEASE_VERSION#v}"
 ANDROID_BUILD_MODE="debug"
 ANDROID_BUILD_ARGS=(--apk --debug --ci)
 ANDROID_KEYSTORE_FILE=""
+ANDROID_KEYSTORE_PATH_RESOLVED=""
+ANDROID_APKSIGNER=""
 
 cleanup_android_signing() {
   if [ -n "${ANDROID_KEYSTORE_FILE}" ] && [ -f "${ANDROID_KEYSTORE_FILE}" ]; then
@@ -56,16 +58,37 @@ tauri.android.versionCode=${android_version_code}
 EOF
 }
 
+resolve_apksigner() {
+  if [ -n "${ANDROID_APKSIGNER}" ]; then
+    return
+  fi
+
+  if command -v apksigner >/dev/null 2>&1; then
+    ANDROID_APKSIGNER="$(command -v apksigner)"
+    return
+  fi
+
+  local sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+  mapfile -t apksigner_candidates < <(find "${sdk_root}/build-tools" -type f -name apksigner 2>/dev/null | sort -Vr)
+  if [ "${#apksigner_candidates[@]}" -eq 0 ]; then
+    echo "Error: apksigner was not found."
+    exit 1
+  fi
+
+  ANDROID_APKSIGNER="${apksigner_candidates[0]}"
+}
+
 configure_android_signing() {
   if [ -n "${ANDROID_KEY_ALIAS:-}" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ] && [ -n "${ANDROID_KEY_BASE64:-}" ]; then
     ANDROID_BUILD_MODE="release"
     ANDROID_BUILD_ARGS=(--apk --ci)
     ANDROID_KEYSTORE_FILE="$(mktemp "${ARTIFACTS_DIR}/android-keystore.XXXXXX.jks")"
     printf '%s' "${ANDROID_KEY_BASE64}" | base64 --decode > "${ANDROID_KEYSTORE_FILE}"
+    ANDROID_KEYSTORE_PATH_RESOLVED="${ANDROID_KEYSTORE_FILE}"
     cat > "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties" <<EOF
 keyAlias=${ANDROID_KEY_ALIAS}
 password=${ANDROID_KEY_PASSWORD}
-storeFile=${ANDROID_KEYSTORE_FILE}
+storeFile=${ANDROID_KEYSTORE_PATH_RESOLVED}
 EOF
     echo "Android signing configured for release APKs."
   elif [ -n "${ANDROID_KEY_ALIAS:-}" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ] && [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
@@ -75,10 +98,11 @@ EOF
     fi
     ANDROID_BUILD_MODE="release"
     ANDROID_BUILD_ARGS=(--apk --ci)
+    ANDROID_KEYSTORE_PATH_RESOLVED="${ANDROID_KEYSTORE_PATH}"
     cat > "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties" <<EOF
 keyAlias=${ANDROID_KEY_ALIAS}
 password=${ANDROID_KEY_PASSWORD}
-storeFile=${ANDROID_KEYSTORE_PATH}
+storeFile=${ANDROID_KEYSTORE_PATH_RESOLVED}
 EOF
     echo "Android signing configured for release APKs from local keystore."
   else
@@ -124,11 +148,27 @@ fi
 
 copied_apk_count=0
 for apk_file in "${apk_files[@]}"; do
-  if [[ "${apk_file}" == *-unsigned.apk ]]; then
-    continue
-  fi
   apk_name="$(basename "${apk_file}")"
   apk_name="${apk_name#app-}"
+  if [[ "${apk_file}" == *-unsigned.apk ]]; then
+    if [ "${ANDROID_BUILD_MODE}" != "release" ]; then
+      continue
+    fi
+    resolve_apksigner
+    apk_name="${apk_name/-unsigned/}"
+    if [[ "${apk_name}" != 303util* ]]; then
+      apk_name="303util-${RELEASE_VERSION}-${apk_name}"
+    fi
+    "${ANDROID_APKSIGNER}" sign \
+      --ks "${ANDROID_KEYSTORE_PATH_RESOLVED}" \
+      --ks-key-alias "${ANDROID_KEY_ALIAS}" \
+      --ks-pass "pass:${ANDROID_KEY_PASSWORD}" \
+      --key-pass "pass:${ANDROID_KEY_PASSWORD}" \
+      --out "${APK_ARTIFACT_DIR}/${apk_name}" \
+      "${apk_file}"
+    copied_apk_count=$((copied_apk_count + 1))
+    continue
+  fi
   if [[ "${apk_name}" != 303util* ]]; then
     apk_name="303util-${RELEASE_VERSION}-${apk_name}"
   fi
