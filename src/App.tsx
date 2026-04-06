@@ -325,10 +325,31 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   ],
 };
 
+const BLANK_PROJECT_TEMPLATE: ProjectData = (() => {
+  const voice1 = makeLine();
+  const voice2 = makeLine();
+  const voice3 = makeLine();
+  voice2.params.delaySubdivision = "1/8.";
+  return {
+    version: 1,
+    programName: "pattern 1",
+    lineCount: 2,
+    scalePresetId: "off",
+    scaleRoot: "C",
+    tempo: 126,
+    selectedLine: 0,
+    lines: [voice1, voice2, voice3],
+  };
+})();
+
 const cloneProjectData = (project: ProjectData): ProjectData => JSON.parse(JSON.stringify(project)) as ProjectData;
 
 const resetProjectState = () => ({
   ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE),
+});
+
+const blankProjectState = () => ({
+  ...cloneProjectData(BLANK_PROJECT_TEMPLATE),
 });
 
 const DEFAULT_PROJECT_STATE = resetProjectState();
@@ -1750,7 +1771,7 @@ function App() {
     const now = Date.now();
     const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const targetLibraryId = selectedLibraryId;
-    const emptyProject: ProjectData = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName: trimmed };
+    const emptyProject: ProjectData = { ...blankProjectState(), programName: trimmed };
 
     const db = await openLocalDb();
     try {
@@ -1787,7 +1808,7 @@ function App() {
   };
 
   const openUnsavedEmptyPattern = () => {
-    const emptyProject: ProjectData = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName: "Untitled" };
+    const emptyProject: ProjectData = { ...blankProjectState(), programName: "Untitled" };
     setSelectedPatternId("");
     loadPattern({
       id: "unsaved-empty",
@@ -1952,7 +1973,7 @@ function App() {
   };
 
   const resetPattern = () => {
-    const resetProject = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName };
+    const resetProject = { ...blankProjectState(), programName };
     setIsPlaying(false);
     setPlayhead(-1);
     voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
@@ -2152,7 +2173,7 @@ function App() {
             <button className="play-button" onClick={() => setIsPlaying((v) => !v)}>
               {isPlaying ? "Stop" : "Play"}
             </button>
-            <button onClick={resetPattern}>Reset</button>
+            <button onClick={resetPattern}>Init</button>
             <button onClick={() => void saveSelectedPattern()}>Save</button>
           </div>
           <div className={`header-actions ${isMobileViewport && !mobileProjectOpen ? "mobile-collapsed" : ""}`}>
