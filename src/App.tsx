@@ -281,11 +281,74 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
   const normalized = (value - min) / (max - min);
   const angle = -135 + normalized * 270;
   const style: React.CSSProperties & { "--angle": string } = { "--angle": `${angle}deg` };
+  const pointerRef = useRef<{ pointerId: number; startY: number; startValue: number } | null>(null);
+  const displayValue = format ? format(value) : value.toString();
+
+  const clampValue = (next: number) => {
+    const clamped = Math.max(min, Math.min(max, next));
+    const snapped = min + Math.round((clamped - min) / step) * step;
+    return Number(snapped.toFixed(6));
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    pointerRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startValue: value,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pointer = pointerRef.current;
+    if (!pointer || pointer.pointerId !== event.pointerId || disabled) return;
+    const deltaY = pointer.startY - event.clientY;
+    const nextValue = pointer.startValue + (deltaY / 160) * (max - min);
+    onChange(clampValue(nextValue));
+  };
+
+  const clearPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pointer = pointerRef.current;
+    if (pointer && event.currentTarget.hasPointerCapture(pointer.pointerId)) {
+      event.currentTarget.releasePointerCapture(pointer.pointerId);
+    }
+    pointerRef.current = null;
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+      event.preventDefault();
+      onChange(clampValue(value + step));
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      onChange(clampValue(value - step));
+    }
+  };
 
   return (
     <label className="knob-control">
       <span className="knob-label">{label}</span>
-      <div className="knob" style={style}>
+      <div
+        className="knob"
+        style={style}
+        role="slider"
+        tabIndex={disabled ? -1 : 0}
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-valuetext={displayValue}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={clearPointer}
+        onPointerCancel={clearPointer}
+        onKeyDown={handleKeyDown}
+      >
         <input
           className="knob-hit"
           type="range"
@@ -297,7 +360,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
           onChange={(e) => onChange(Number(e.currentTarget.value))}
         />
       </div>
-      <span className="knob-value">{format ? format(value) : value.toString()}</span>
+      <span className="knob-value">{displayValue}</span>
     </label>
   );
 }
@@ -410,15 +473,27 @@ function App() {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
   const [selectedPatternId, setSelectedPatternId] = useState<string>(() => window.localStorage.getItem(LAST_PATTERN_ID_KEY) ?? "");
   const [storageAction, setStorageAction] = useState("menu");
-  const [isPhoneLandscape, setIsPhoneLandscape] = useState(
+  const [isMobileViewport, setIsMobileViewport] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches,
+  );
+  const [isPhoneLandscape, setIsPhoneLandscape] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 980px)").matches &&
+      window.matchMedia("(orientation: landscape)").matches,
   );
   const [mobileControlsOpen, setMobileControlsOpen] = useState(
     () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches),
   );
   const [mobileProjectOpen, setMobileProjectOpen] = useState(
-    () => !(typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches),
+    () =>
+      !(
+        typeof window !== "undefined" &&
+        window.matchMedia("(max-width: 980px)").matches &&
+        window.matchMedia("(orientation: landscape)").matches
+      ),
   );
+  const [mobileModifiersOpen, setMobileModifiersOpen] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleSyncStatus, setGoogleSyncStatus] = useState<"idle" | "connecting" | "syncing" | "ready">("idle");
@@ -875,7 +950,7 @@ function App() {
     const rowHeight = 24;
     const labelWidth = 100;
     const colWidth = Math.floor((canvas.width - left - labelWidth - 16) / cols);
-    const labels = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"];
+    const labels = ["STEP", "TIME", "NOTE", "DOWN", "UP", "ACC", "SLIDE"];
     const active = lines[selectedLine].steps.slice(0, lines[selectedLine].patternLength);
 
     labels.forEach((label, r) => {
@@ -907,7 +982,7 @@ function App() {
 
   const buildExportDataUrl = () => {
     const exportVoices = Math.max(1, Math.min(3, lineCount));
-    const voiceRows = ["STEP", "NOTE", "DOWN", "UP", "ACC", "SLIDE", "TIME"] as const;
+    const voiceRows = ["STEP", "TIME", "NOTE", "DOWN", "UP", "ACC", "SLIDE"] as const;
     const voiceBlockHeight = 286;
     const canvas = document.createElement("canvas");
     canvas.width = 980;
@@ -1748,16 +1823,23 @@ function App() {
   }, [lines, selectedLine, tempo, programName]);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 980px)");
+    const mobileQuery = window.matchMedia("(max-width: 980px)");
+    const orientationQuery = window.matchMedia("(orientation: landscape)");
     const syncLandscapeState = () => {
-      const isLandscapePhone = mediaQuery.matches;
-      setIsPhoneLandscape(isLandscapePhone);
-      setMobileProjectOpen(!isLandscapePhone);
-      if (!isLandscapePhone) setMobileControlsOpen(true);
+      const nextIsMobile = mobileQuery.matches;
+      const nextIsPhoneLandscape = nextIsMobile && orientationQuery.matches;
+      setIsMobileViewport(nextIsMobile);
+      setIsPhoneLandscape(nextIsPhoneLandscape);
+      setMobileProjectOpen(!nextIsPhoneLandscape);
+      setMobileControlsOpen(true);
     };
     syncLandscapeState();
-    mediaQuery.addEventListener("change", syncLandscapeState);
-    return () => mediaQuery.removeEventListener("change", syncLandscapeState);
+    mobileQuery.addEventListener("change", syncLandscapeState);
+    orientationQuery.addEventListener("change", syncLandscapeState);
+    return () => {
+      mobileQuery.removeEventListener("change", syncLandscapeState);
+      orientationQuery.removeEventListener("change", syncLandscapeState);
+    };
   }, []);
 
   useEffect(() => {
@@ -1780,6 +1862,12 @@ function App() {
   const shouldShowRotateOverlay = false;
   const controlsToggleLabel = mobileControlsOpen ? "Hide Controls" : "Controls";
   const projectToggleLabel = mobileProjectOpen ? "Hide Project" : "Project";
+  const modifiersToggleLabel = mobileModifiersOpen ? "Hide Mods" : "Mods";
+  const patternTimingLabel = patternTimingMode === "normal" ? "♪" : "♪₃";
+  const patternTimingAriaLabel = patternTimingMode === "normal" ? "Regular note timing" : "Triplet note timing";
+  const synthLabels = isMobileViewport
+    ? { resonance: "RES", envMod: "ENV", accent: "ACC", volume: "VOL", delayTime: "TIME", feedback: "FDBK", delayMix: "MIX", distortion: "DIST", reverb: "REV" }
+    : { resonance: "Resonance", envMod: "Env Mod", accent: "Accent", volume: "Volume", delayTime: "Delay Time", feedback: "Feedback", delayMix: "Delay Mix", distortion: "Distortion", reverb: "Reverb" };
   const enterFullscreen = () => {
     const fullDoc = document as FullscreenDocument;
     const fullElement = document.documentElement as FullscreenElement;
@@ -1847,6 +1935,19 @@ function App() {
     </div>
   );
 
+  const renderWaveformToggle = (extraClassName?: string) => (
+    <div className={extraClassName ? `wave-toggle ${extraClassName}` : "wave-toggle"}>
+      <button
+        type="button"
+        className="selected"
+        aria-label={params.waveform === "sawtooth" ? "Switch to square waveform" : "Switch to saw waveform"}
+        onClick={() => updateParams({ waveform: params.waveform === "sawtooth" ? "square" : "sawtooth" })}
+      >
+        {params.waveform === "sawtooth" ? "/|" : "_-_"}
+      </button>
+    </div>
+  );
+
   return (
     <main className="app">
       {shouldShowRotateOverlay ? (
@@ -1856,7 +1957,7 @@ function App() {
       ) : null}
       <header className="panel header-panel">
         <div className="header-row">
-          <h1>{isPhoneLandscape ? "TB-303" : "TB-303 Companion"}</h1>
+          <h1>{isMobileViewport ? "TB-303" : "TB-303 util"}</h1>
           <div className="header-primary-actions">
             <button className="play-button" onClick={() => setIsPlaying((v) => !v)}>
               {isPlaying ? "Stop" : "Play"}
@@ -1865,21 +1966,23 @@ function App() {
             <button onClick={() => void saveSelectedPattern()}>Save</button>
           </div>
           <div className={`header-actions ${isPhoneLandscape && !mobileProjectOpen ? "mobile-collapsed" : ""}`}>
-            <div className="view-toggle" role="group" aria-label="Pattern timing">
+            <div className="view-toggle header-timing-toggle" role="group" aria-label="Pattern timing">
               <button
                 type="button"
                 className={patternTimingMode === "triplet" ? "selected" : ""}
+                aria-label={patternTimingAriaLabel}
+                title={patternTimingAriaLabel}
                 onClick={togglePatternTimingMode}
               >
-                {patternTimingMode === "normal" ? "Normal" : "Triplet"}
+                {patternTimingLabel}
               </button>
             </div>
-            <label className="header-program">
+            <label className="header-program header-program-name">
               Program
               <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
             </label>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
-            <label className="header-program">
+            <label className="header-program header-pattern-select">
               Pattern
               <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
                 <option value="">Select...</option>
@@ -1891,6 +1994,7 @@ function App() {
               </select>
             </label>
             <select
+              className="header-storage-menu"
               value={storageAction}
               onChange={(e) => {
                 const action = e.currentTarget.value;
@@ -1945,6 +2049,15 @@ function App() {
             >
               {projectToggleLabel}
             </button>
+            <button
+              type="button"
+              className="mobile-modifiers-toggle"
+              onClick={() => setMobileModifiersOpen((open) => !open)}
+              aria-expanded={mobileModifiersOpen}
+              aria-controls="mobile-modifier-controls"
+            >
+              {modifiersToggleLabel}
+            </button>
             {renderAuxControls("mobile-aux-controls")}
           </div>
 
@@ -1952,63 +2065,133 @@ function App() {
             id="mobile-hardware-controls"
             className={`knob-groups ${isPhoneLandscape && !mobileControlsOpen ? "mobile-collapsed" : ""}`}
           >
-            <div className="wave-knob-slot">
-              <select value={params.waveform} onChange={(e) => updateParams({ waveform: e.currentTarget.value as OscillatorType })}>
-                <option value="sawtooth">Saw</option>
-                <option value="square">Square</option>
-              </select>
-            </div>
+            {isMobileViewport ? (
+              <>
+                <div className="leading-controls">
+                  <div className="bpm-knob-slot">
+                    <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
+                  </div>
+                  <div className="volume-knob-slot">
+                    <KnobControl label={synthLabels.volume} min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  </div>
+                </div>
 
-            <div className="delay-divider" />
+                <div className="delay-divider" />
 
-            <div className="knob-grid main-knobs">
-              <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
-              <KnobControl label="Tune" min={-12} max={12} step={1} value={params.tune} onChange={(v) => updateParams({ tune: v })} />
-              <KnobControl label="Cutoff" min={180} max={2400} value={params.cutoff} onChange={(v) => updateParams({ cutoff: v })} />
-              <KnobControl label="Resonance" min={0} max={22} step={0.2} value={params.resonance} onChange={(v) => updateParams({ resonance: v })} />
-              <KnobControl label="Env Mod" min={0} max={2600} value={params.envMod} onChange={(v) => updateParams({ envMod: v })} />
-              <KnobControl label="Decay" min={0.08} max={0.6} step={0.01} value={params.decay} onChange={(v) => updateParams({ decay: v })} format={(v) => v.toFixed(2)} />
-              <KnobControl label="Accent" min={1} max={2.5} step={0.05} value={params.accent} onChange={(v) => updateParams({ accent: v })} format={(v) => v.toFixed(2)} />
-            </div>
+                <div className="knob-grid main-knobs">
+                  <div className="wave-knob-slot">{renderWaveformToggle()}</div>
+                  <KnobControl label="Tune" min={-12} max={12} step={1} value={params.tune} onChange={(v) => updateParams({ tune: v })} />
+                  <KnobControl label="Cutoff" min={180} max={2400} value={params.cutoff} onChange={(v) => updateParams({ cutoff: v })} />
+                  <KnobControl label={synthLabels.resonance} min={0} max={22} step={0.2} value={params.resonance} onChange={(v) => updateParams({ resonance: v })} />
+                  <KnobControl label={synthLabels.envMod} min={0} max={2600} value={params.envMod} onChange={(v) => updateParams({ envMod: v })} />
+                  <KnobControl label="Decay" min={0.08} max={0.6} step={0.01} value={params.decay} onChange={(v) => updateParams({ decay: v })} format={(v) => v.toFixed(2)} />
+                  <KnobControl label={synthLabels.accent} min={1} max={2.5} step={0.05} value={params.accent} onChange={(v) => updateParams({ accent: v })} format={(v) => v.toFixed(2)} />
+                </div>
 
-            <div className="delay-divider" />
+                <div className="delay-divider" />
 
-            <div className="knob-grid fx-knobs">
-              <label className="knob-control delay-sync-control">
-                <button
-                  className={params.delaySync ? "selected" : ""}
-                  onClick={() => updateParams({ delaySync: !params.delaySync })}
-                >
-                  {params.delaySync ? "SYNC" : "FREE"}
-                </button>
-                <select
-                  value={params.delaySubdivision}
-                  disabled={!params.delaySync}
-                  onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                >
-                  {DELAY_SUBDIVISIONS.map((subdivision) => (
-                    <option key={subdivision.value} value={subdivision.value}>
-                      {subdivision.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <KnobControl
-                label="Delay Time"
-                min={0.02}
-                max={1}
-                step={0.01}
-                value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-                disabled={params.delaySync}
-                onChange={(v) => updateParams({ delayTime: v })}
-                format={(v) => `${v.toFixed(2)}s`}
-              />
-              <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
-              <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
-              <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
-              <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
-              <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
-            </div>
+                <div className="knob-grid fx-knobs">
+                  <label className="knob-control delay-sync-control">
+                    <button
+                      className={params.delaySync ? "selected" : ""}
+                      aria-label={params.delaySync ? "Switch delay to free time" : "Switch delay to synced time"}
+                      onClick={() => updateParams({ delaySync: !params.delaySync })}
+                    >
+                      {params.delaySync ? "S" : "F"}
+                    </button>
+                    <select
+                      aria-label="Delay subdivision"
+                      value={params.delaySubdivision}
+                      disabled={!params.delaySync}
+                      onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                    >
+                      {DELAY_SUBDIVISIONS.map((subdivision) => (
+                        <option key={subdivision.value} value={subdivision.value}>
+                          {subdivision.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <KnobControl
+                    label={synthLabels.delayTime}
+                    min={0.02}
+                    max={1}
+                    step={0.01}
+                    value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+                    disabled={params.delaySync}
+                    onChange={(v) => updateParams({ delayTime: v })}
+                    format={(v) => `${v.toFixed(2)}s`}
+                  />
+                  <KnobControl label={synthLabels.feedback} min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  <KnobControl label={synthLabels.delayMix} min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  <KnobControl label={synthLabels.distortion} min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  <KnobControl label={synthLabels.reverb} min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="leading-controls desktop-leading-controls">
+                  <div className="bpm-knob-slot desktop-bpm-knob-slot">
+                    <KnobControl label="BPM" min={80} max={180} value={tempo} onChange={setTempo} />
+                  </div>
+                  <div className="volume-knob-slot desktop-volume-knob-slot">
+                    <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  </div>
+                </div>
+
+                <div className="delay-divider" />
+
+                <div className="knob-grid main-knobs">
+                  <div className="wave-knob-slot">
+                    {renderWaveformToggle("desktop-wave-toggle")}
+                  </div>
+                  <KnobControl label="Tune" min={-12} max={12} step={1} value={params.tune} onChange={(v) => updateParams({ tune: v })} />
+                  <KnobControl label="Cutoff" min={180} max={2400} value={params.cutoff} onChange={(v) => updateParams({ cutoff: v })} />
+                  <KnobControl label="Resonance" min={0} max={22} step={0.2} value={params.resonance} onChange={(v) => updateParams({ resonance: v })} />
+                  <KnobControl label="Env Mod" min={0} max={2600} value={params.envMod} onChange={(v) => updateParams({ envMod: v })} />
+                  <KnobControl label="Decay" min={0.08} max={0.6} step={0.01} value={params.decay} onChange={(v) => updateParams({ decay: v })} format={(v) => v.toFixed(2)} />
+                  <KnobControl label="Accent" min={1} max={2.5} step={0.05} value={params.accent} onChange={(v) => updateParams({ accent: v })} format={(v) => v.toFixed(2)} />
+                </div>
+
+                <div className="delay-divider" />
+
+                <div className="knob-grid fx-knobs">
+                  <label className="knob-control delay-sync-control">
+                    <button
+                      className={params.delaySync ? "selected" : ""}
+                      onClick={() => updateParams({ delaySync: !params.delaySync })}
+                    >
+                      {params.delaySync ? "SYNC" : "FREE"}
+                    </button>
+                    <select
+                      value={params.delaySubdivision}
+                      disabled={!params.delaySync}
+                      onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                    >
+                      {DELAY_SUBDIVISIONS.map((subdivision) => (
+                        <option key={subdivision.value} value={subdivision.value}>
+                          {subdivision.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <KnobControl
+                    label="Delay Time"
+                    min={0.02}
+                    max={1}
+                    step={0.01}
+                    value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+                    disabled={params.delaySync}
+                    onChange={(v) => updateParams({ delayTime: v })}
+                    format={(v) => `${v.toFixed(2)}s`}
+                  />
+                  <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                  <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                </div>
+              </>
+            )}
 
             <div className="delay-divider desktop-aux-divider" />
             {renderAuxControls("desktop-aux-controls")}
@@ -2047,7 +2230,10 @@ function App() {
               ))}
             </div>
 
-            <div className="top-lanes">
+            <div
+              id="mobile-modifier-controls"
+              className={`top-lanes ${isMobileViewport && !mobileModifiersOpen ? "mobile-collapsed" : ""}`}
+            >
               <div className="lane-row">
                 <div className="lane-label">DOWN</div>
                 {Array.from({ length: patternLength }, (_, s) => {

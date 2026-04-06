@@ -50,40 +50,48 @@ body {
   font-size: 1.05rem;
   color: #f8f8f8;
   letter-spacing: 0.03em;
+  flex: 0 0 auto;
+  min-width: 210px;
 }
 
 .header-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .header-primary-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+.header-primary-actions button {
+  width: 92px;
+  height: 38px;
+  padding: 0 14px;
+  justify-content: center;
 }
 
 .header-primary-actions .play-button {
+  width: 100px;
   font-size: 0.9rem;
   font-weight: 700;
-  padding: 5px 12px;
-  min-width: 88px;
 }
 
 .header-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   flex-wrap: nowrap;
 }
 
 .header-actions label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 0.68rem;
+  gap: 6px;
+  font-size: 0.72rem;
   color: #ecf0f4;
 }
 
@@ -103,11 +111,39 @@ body {
 }
 
 .header-program {
-  min-width: 140px;
+  min-width: 0;
 }
 
 .header-program input {
-  min-width: 140px;
+  min-width: 0;
+}
+
+.header-actions .header-timing-toggle button,
+.header-actions input,
+.header-actions select {
+  height: 38px;
+}
+
+.header-actions .header-timing-toggle button {
+  width: 92px;
+  min-width: 92px;
+  padding: 0 14px;
+  justify-content: center;
+}
+
+.header-program-name input {
+  width: 178px;
+  min-width: 178px;
+}
+
+.header-pattern-select select {
+  width: 120px;
+  min-width: 120px;
+}
+
+.header-storage-menu {
+  width: 220px;
+  min-width: 220px;
 }
 
 button,
@@ -181,25 +217,47 @@ button.selected {
 .knob-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(74px, 1fr));
-  gap: 2px;
+  gap: 6px;
 }
 
 .main-knobs {
-  grid-template-columns: repeat(7, 60px);
+  grid-template-columns: 34px repeat(6, 64px);
 }
 
 .fx-knobs {
-  grid-template-columns: repeat(7, 58px);
+  grid-template-columns: repeat(7, 64px);
 }
 
+.volume-knob-slot,
 .wave-knob-slot {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
 }
 
-.wave-knob-slot select {
-  min-width: 92px;
-  height: 32px;
+.leading-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wave-toggle {
+  display: flex;
+}
+
+.wave-toggle button {
+  min-width: 22px;
+  height: 24px;
+  padding: 0 3px;
+  font-size: 0.62rem;
+  line-height: 1;
+}
+
+.desktop-wave-toggle button {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 0.7rem;
 }
 
 .aux-controls {
@@ -219,6 +277,7 @@ button.selected {
 .mobile-controls-toggle,
 .mobile-fullscreen-toggle,
 .mobile-project-toggle,
+.mobile-modifiers-toggle,
 .mobile-aux-controls {
   display: none;
 }
@@ -234,6 +293,9 @@ button.selected {
   display: grid;
   justify-items: center;
   gap: 1px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .delay-sync-control {
@@ -250,11 +312,16 @@ button.selected {
 }
 
 .knob-label {
+  width: 100%;
   font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: #f2f5f8;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .knob {
@@ -265,6 +332,11 @@ button.selected {
   background: #3a4047;
   position: relative;
   box-shadow: none;
+}
+
+.knob:focus-visible {
+  outline: 1px solid #f3f6fa;
+  outline-offset: 2px;
 }
 
 .knob::before {
@@ -283,14 +355,16 @@ button.selected {
 .knob-hit {
   appearance: none;
   position: absolute;
-  inset: 0;
+  inset: -8px;
   margin: 0;
-  width: 100%;
-  height: 100%;
+  width: calc(100% + 16px);
+  height: calc(100% + 16px);
   border-radius: 50%;
   background: transparent;
   opacity: 0;
-  cursor: pointer;
+  cursor: ns-resize;
+  pointer-events: none;
+  touch-action: none;
 }
 
 .knob-value {
@@ -530,7 +604,7 @@ button.selected {
 
 @media (max-width: 1120px) {
   .main-knobs {
-    grid-template-columns: repeat(7, 54px);
+    grid-template-columns: 30px repeat(6, 54px);
   }
 
   .fx-knobs {
@@ -545,15 +619,15 @@ button.selected {
 
   #root {
     height: 100dvh;
-    padding: 0;
+    padding: 4px;
   }
 
   .app {
     max-width: none;
     height: 100%;
     min-height: 100dvh;
-    padding: 1px;
-    gap: 1px;
+    padding: 0;
+    gap: 4px;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -567,14 +641,14 @@ button.selected {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
-    gap: 1px;
+    gap: 4px;
     min-height: 0;
     height: 0;
   }
 
   .hardware-panel {
     margin: 0;
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -583,39 +657,59 @@ button.selected {
   .mobile-hardware-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    min-height: 28px;
+    justify-content: flex-start;
+    gap: 3px;
+    min-height: 24px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    padding-bottom: 1px;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
   }
 
   .mobile-controls-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 26px;
-    padding: 0 8px;
-    font-size: 0.66rem;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 0.62rem;
     white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .mobile-fullscreen-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 26px;
-    padding: 0 8px;
-    font-size: 0.66rem;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 0.62rem;
     white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .mobile-project-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 26px;
-    padding: 0 8px;
-    font-size: 0.66rem;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 0.62rem;
     white-space: nowrap;
+    flex: 0 0 auto;
+  }
+
+  .mobile-modifiers-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 0.62rem;
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .desktop-aux-controls,
@@ -625,12 +719,10 @@ button.selected {
 
   .mobile-aux-controls {
     display: flex;
-    margin-left: auto;
+    margin-left: 0;
     gap: 2px;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    padding-bottom: 1px;
+    min-width: max-content;
+    flex: 0 0 auto;
   }
 
   .panel {
@@ -638,17 +730,20 @@ button.selected {
   }
 
   .header-row {
-    gap: 4px;
+    gap: 2px;
+    min-width: 0;
   }
 
   .header-panel h1 {
-    font-size: 0.9rem;
-    min-width: 72px;
+    font-size: 0.8rem;
+    min-width: 56px;
+    letter-spacing: 0.02em;
+    flex: 0 0 auto;
   }
 
   .header-primary-actions,
   .header-actions {
-    gap: 3px;
+    gap: 2px;
   }
 
   .header-primary-actions {
@@ -657,6 +752,8 @@ button.selected {
     overflow-x: auto;
     scrollbar-width: thin;
     padding-bottom: 1px;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
   }
 
   .header-actions {
@@ -665,6 +762,8 @@ button.selected {
     padding-bottom: 1px;
     min-width: 0;
     flex: 1 1 auto;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
   }
 
   .header-actions.mobile-collapsed {
@@ -676,33 +775,51 @@ button.selected {
   }
 
   .header-small {
-    min-width: 46px;
+    min-width: 42px;
   }
 
   .header-small input,
   .header-small select {
-    min-width: 42px;
+    min-width: 38px;
   }
 
   .header-program {
-    min-width: 92px;
+    min-width: 68px;
   }
 
-  .header-program input {
-    min-width: 86px;
+  .header-actions label {
+    gap: 2px;
+    font-size: 0.56rem;
+    white-space: nowrap;
+  }
+
+  .header-program input,
+  .header-program select {
+    width: 72px;
+    min-width: 72px;
+  }
+
+  .header-actions > select {
+    width: 78px;
+    min-width: 78px;
   }
 
   button,
   select,
-  input[type="number"] {
-    font-size: 0.72rem;
-    padding: 2px 5px;
+  input[type="number"],
+  input[type="text"] {
+    font-size: 0.66rem;
+    padding: 1px 4px;
   }
 
   .header-primary-actions .play-button {
-    min-width: 62px;
-    font-size: 0.8rem;
-    padding: 3px 7px;
+    width: 52px;
+    font-size: 0.72rem;
+    padding: 2px 6px;
+  }
+
+  .header-primary-actions button {
+    width: 52px;
   }
 
   .editor-sheet-row {
@@ -716,39 +833,68 @@ button.selected {
   }
 
   .main-knobs {
-    grid-template-columns: repeat(7, 42px);
+    grid-template-columns: 24px repeat(6, 52px);
   }
 
   .fx-knobs {
-    grid-template-columns: repeat(7, 40px);
+    grid-template-columns: repeat(7, 52px);
+  }
+
+  .wave-toggle button {
+    min-width: 18px;
+    height: 20px;
+    padding: 0 2px;
+    font-size: 0.52rem;
+  }
+
+  .volume-knob-slot {
+    width: 40px;
+  }
+
+  .wave-knob-slot {
+    width: 24px;
+    justify-content: center;
+  }
+
+  .leading-controls {
+    gap: 4px;
   }
 
   .knob {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
   }
 
   .knob::before {
-    height: 9px;
+    height: 8px;
     top: 3px;
-    transform-origin: 50% 11px;
+    transform-origin: 50% 10px;
   }
 
   .delay-sync-control button,
   .delay-sync-control select {
-    height: 20px;
+    height: 18px;
+    width: 40px;
+    min-width: 40px;
+    padding: 0 1px;
+    font-size: 0.5rem;
   }
 
   .knob-control {
     width: 100%;
     min-width: 0;
-    grid-template-rows: 16px 30px;
+    grid-template-rows: 12px 26px;
     align-items: start;
+    overflow: hidden;
+  }
+
+  .delay-sync-control {
+    overflow: hidden;
   }
 
   .knob-label {
     width: 100%;
-    min-height: 16px;
+    min-height: 12px;
     line-height: 1;
     text-align: center;
     display: flex;
@@ -757,36 +903,45 @@ button.selected {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.45rem;
+    font-size: 0.42rem;
     letter-spacing: 0.02em;
   }
 
   .knob-groups {
-    gap: 4px;
+    gap: 2px;
     width: max-content;
     min-width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: thin;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 1px;
   }
 
   .knob-groups.mobile-collapsed {
     display: none;
   }
 
+  .top-lanes.mobile-collapsed {
+    display: none;
+  }
+
   .delay-divider {
-    min-height: 34px;
+    min-height: 28px;
   }
 
   .aux-controls {
     gap: 2px;
+    min-width: max-content;
   }
 
   .aux-controls button,
   .view-toggle button {
-    height: 26px;
-    padding: 0 6px;
-    font-size: 0.66rem;
+    height: 24px;
+    padding: 0 5px;
+    font-size: 0.62rem;
+    white-space: nowrap;
   }
 
   .roll-panel h2 {
@@ -895,12 +1050,8 @@ button.selected {
 }
 
 @media (max-width: 980px) and (orientation: portrait) {
-  body {
-    overflow: hidden;
-  }
-
   #root {
-    padding: 0;
+    padding: 4px;
     height: 100dvh;
   }
 
