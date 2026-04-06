@@ -4,6 +4,7 @@ import "./App.css";
 const STEPS = 16;
 const MAX_LINES = 3;
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
+const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const DELAY_SUBDIVISIONS = [
   { value: "1/4", label: "1/4", beats: 1 },
   { value: "1/4.", label: "1/4.", beats: 1.5 },
@@ -18,6 +19,7 @@ const DELAY_SUBDIVISIONS = [
 ] as const;
 
 type PitchName = (typeof PITCHES)[number];
+type PitchClass = (typeof PITCH_CLASSES)[number];
 type TimeMode = "note" | "tie" | "rest";
 type Transpose = "none" | "down" | "up";
 type PatternTimingMode = "normal" | "triplet";
@@ -76,6 +78,8 @@ type ProjectData = {
   programName: string;
   lineCount: 1 | 2 | 3;
   patternTimingMode: PatternTimingMode;
+  scalePresetId?: string;
+  scaleRoot?: PitchClass;
   patternLength?: number;
   tempo: number;
   selectedLine: number;
@@ -157,6 +161,68 @@ const GOOGLE_SYNC_ENABLED_KEY = "tb303:google-sync-enabled";
 
 let googleScriptPromise: Promise<void> | null = null;
 
+const SCALE_PRESETS = [
+  { id: "major-ionian", label: "Major (Ionian)", group: "Major scales", intervals: [0, 2, 4, 5, 7, 9, 11] },
+  { id: "dorian", label: "Dorian", group: "Major scales", intervals: [0, 2, 3, 5, 7, 9, 10] },
+  { id: "phrygian", label: "Phrygian", group: "Major scales", intervals: [0, 1, 3, 5, 7, 8, 10] },
+  { id: "lydian", label: "Lydian", group: "Major scales", intervals: [0, 2, 4, 6, 7, 9, 11] },
+  { id: "mixolydian", label: "Mixolydian", group: "Major scales", intervals: [0, 2, 4, 5, 7, 9, 10] },
+  { id: "minor-aeolian", label: "Minor (Aeolian)", group: "Major scales", intervals: [0, 2, 3, 5, 7, 8, 10] },
+  { id: "locrian", label: "Locrian", group: "Major scales", intervals: [0, 1, 3, 5, 6, 8, 10] },
+  { id: "melodic-minor", label: "Melodic Minor", group: "Melodic minor scales", intervals: [0, 2, 3, 5, 7, 9, 11] },
+  { id: "dorian-b2", label: "Dorian b2", group: "Melodic minor scales", intervals: [0, 1, 3, 5, 7, 9, 10] },
+  { id: "lydian-augmented", label: "Lydian Augmented", group: "Melodic minor scales", intervals: [0, 2, 4, 6, 8, 9, 11] },
+  { id: "lydian-dominant", label: "Lydian Dominant", group: "Melodic minor scales", intervals: [0, 2, 4, 6, 7, 9, 10] },
+  { id: "mixolydian-b6", label: "Mixolydian b6 (Hindu)", group: "Melodic minor scales", intervals: [0, 2, 4, 5, 7, 8, 10] },
+  { id: "aeolian-b5", label: "Aeolian b5 (Locrian nat2)", group: "Melodic minor scales", intervals: [0, 2, 3, 5, 6, 8, 10] },
+  { id: "super-locrian", label: "Super Locrian", group: "Melodic minor scales", intervals: [0, 1, 3, 4, 6, 8, 10] },
+  { id: "harmonic-minor", label: "Harmonic Minor", group: "Harmonic minor scales", intervals: [0, 2, 3, 5, 7, 8, 11] },
+  { id: "locrian-nat6", label: "Locrian nat-6", group: "Harmonic minor scales", intervals: [0, 1, 3, 5, 6, 9, 10] },
+  { id: "ionian-sharp5", label: "Ionian #5 (Aug)", group: "Harmonic minor scales", intervals: [0, 2, 4, 5, 8, 9, 11] },
+  { id: "dorian-sharp4", label: "Dorian #4", group: "Harmonic minor scales", intervals: [0, 2, 3, 6, 7, 9, 10] },
+  { id: "phrygian-dominant", label: "Phrygian Dom (SP Gypsy)", group: "Harmonic minor scales", intervals: [0, 1, 4, 5, 7, 8, 10] },
+  { id: "lydian-sharp2", label: "Lydian #2", group: "Harmonic minor scales", intervals: [0, 3, 4, 6, 7, 9, 11] },
+  { id: "altered", label: "Altered", group: "Harmonic minor scales", intervals: [0, 1, 3, 4, 6, 8, 10] },
+  { id: "major-pentatonic", label: "Major Pentatonic", group: "Miscellaneous scales", intervals: [0, 2, 4, 7, 9] },
+  { id: "minor-pentatonic", label: "Minor Pentatonic", group: "Miscellaneous scales", intervals: [0, 3, 5, 7, 10] },
+  { id: "whole-tone", label: "Whole Tone", group: "Miscellaneous scales", intervals: [0, 2, 4, 6, 8, 10] },
+  { id: "whole-half-diminished", label: "Whole Half Diminished", group: "Miscellaneous scales", intervals: [0, 2, 3, 5, 6, 8, 9, 11] },
+  { id: "half-whole-diminished", label: "Half Whole Diminished", group: "Miscellaneous scales", intervals: [0, 1, 3, 4, 6, 7, 9, 10] },
+  { id: "minor-blues", label: "Minor Blues", group: "Miscellaneous scales", intervals: [0, 3, 5, 6, 7, 10] },
+  { id: "chromatic", label: "Chromatic", group: "Miscellaneous scales", intervals: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] },
+  { id: "bhairav-arabic", label: "Bhairav / Arabic", group: "World scales", intervals: [0, 1, 4, 5, 7, 8, 11] },
+  { id: "hungarian-minor", label: "Hungarian Minor", group: "World scales", intervals: [0, 2, 3, 6, 7, 8, 11] },
+  { id: "chinese", label: "Chinese", group: "World scales", intervals: [0, 4, 6, 7, 11] },
+  { id: "hirajoshi", label: "Hirajoshi", group: "World scales", intervals: [0, 2, 3, 7, 8] },
+  { id: "in-sen", label: "In-Sen", group: "World scales", intervals: [0, 1, 5, 7, 10] },
+  { id: "kumoi", label: "Kumoi", group: "World scales", intervals: [0, 2, 3, 7, 9] },
+  { id: "pelog", label: "Pelog", group: "World scales", intervals: [0, 1, 3, 7, 8] },
+  { id: "major-triad", label: "Major", group: "Major chords", intervals: [0, 4, 7] },
+  { id: "major-6", label: "Major 6th", group: "Major chords", intervals: [0, 4, 7, 9] },
+  { id: "major-7", label: "Major 7th", group: "Major chords", intervals: [0, 4, 7, 11] },
+  { id: "major-7-b5", label: "Major 7th (b5)", group: "Major chords", intervals: [0, 4, 6, 11] },
+  { id: "major-7-sharp5", label: "Major 7th (#5)", group: "Major chords", intervals: [0, 4, 8, 11] },
+  { id: "dominant-7", label: "Dominant 7th", group: "Major chords", intervals: [0, 4, 7, 10] },
+  { id: "major-9", label: "Major 9th", group: "Major chords", intervals: [0, 2, 4, 7, 11] },
+  { id: "minor-triad", label: "Minor", group: "Minor chords", intervals: [0, 3, 7] },
+  { id: "minor-6", label: "Minor 6th", group: "Minor chords", intervals: [0, 3, 7, 9] },
+  { id: "minor-7", label: "Minor 7th", group: "Minor chords", intervals: [0, 3, 7, 10] },
+  { id: "minor-7-b5", label: "Minor 7th (b5)", group: "Minor chords", intervals: [0, 3, 6, 10] },
+  { id: "diminished-7", label: "Diminished 7th", group: "Minor chords", intervals: [0, 3, 6, 9] },
+  { id: "minor-9", label: "Minor 9th", group: "Minor chords", intervals: [0, 2, 3, 7, 10] },
+  { id: "minor-11", label: "Minor 11th", group: "Minor chords", intervals: [0, 2, 3, 5, 7, 10] },
+] as const;
+
+const SCALE_PRESET_ID_SET = new Set<string>(SCALE_PRESETS.map((preset) => preset.id));
+const SCALE_PRESET_GROUPS = Array.from(
+  SCALE_PRESETS.reduce<Map<string, (typeof SCALE_PRESETS)[number][]>>((groups, preset) => {
+    const items = [...(groups.get(preset.group) ?? []), preset];
+    groups.set(preset.group, items);
+    return groups;
+  }, new Map()),
+);
+const PITCH_CLASS_INDEX: Record<PitchClass, number> = Object.fromEntries(PITCH_CLASSES.map((pitchClass, index) => [pitchClass, index])) as Record<PitchClass, number>;
+
 const defaultParams = (): VoiceParams => ({
   waveform: "sawtooth",
   tune: 0,
@@ -212,6 +278,8 @@ const resetProjectState = () => ({
   tempo: 126,
   programName: "Program",
   patternTimingMode: "normal" as PatternTimingMode,
+  scalePresetId: "off",
+  scaleRoot: "C" as PitchClass,
   selectedLine: 0,
   lines: defaultProjectLines(),
 });
@@ -263,8 +331,17 @@ const makeImpulseResponse = (ctx: AudioContext) => {
 };
 
 const isPitchName = (value: unknown): value is PitchName => typeof value === "string" && (PITCHES as readonly string[]).includes(value);
+const isPitchClass = (value: unknown): value is PitchClass => typeof value === "string" && (PITCH_CLASSES as readonly string[]).includes(value);
+const isScalePresetId = (value: unknown): value is string => typeof value === "string" && value !== "off" && SCALE_PRESET_ID_SET.has(value);
 
 const shortNote = (pitch: PitchName | null): string => (pitch ? pitch : "-");
+const toPitchClass = (pitch: PitchName): PitchClass => pitch.replace(/\d/g, "") as PitchClass;
+const buildScalePitchClassSet = (root: PitchClass, presetId: string): Set<PitchClass> => {
+  const preset = SCALE_PRESETS.find((entry) => entry.id === presetId);
+  if (!preset) return new Set();
+  const rootIndex = PITCH_CLASS_INDEX[root];
+  return new Set(preset.intervals.map((interval) => PITCH_CLASSES[(rootIndex + interval) % PITCH_CLASSES.length]));
+};
 
 type KnobProps = {
   label: string;
@@ -478,6 +555,8 @@ function App() {
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
   const [patternTimingMode, setPatternTimingMode] = useState<PatternTimingMode>(DEFAULT_PROJECT_STATE.patternTimingMode);
+  const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId);
+  const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot);
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
   const [lines, setLines] = useState<LineState[]>(() => DEFAULT_PROJECT_STATE.lines);
   const [selectedLine, setSelectedLine] = useState(DEFAULT_PROJECT_STATE.selectedLine);
@@ -531,6 +610,8 @@ function App() {
     programName,
     lineCount,
     patternTimingMode,
+    scalePresetId,
+    scaleRoot,
     tempo,
     selectedLine,
     lines,
@@ -1102,6 +1183,8 @@ function App() {
     if (data.lineCount !== 1 && data.lineCount !== 2 && data.lineCount !== 3) throw new Error("voiceCount must be 1, 2, or 3.");
     const patternTimingMode: PatternTimingMode =
       data.patternTimingMode === "triplet" || data.patternTimingMode === "normal" ? data.patternTimingMode : "normal";
+    const scalePresetId = data.scalePresetId === "off" || isScalePresetId(data.scalePresetId) ? data.scalePresetId : "off";
+    const scaleRoot = isPitchClass(data.scaleRoot) ? data.scaleRoot : "C";
     if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
     if (typeof data.selectedLine !== "number" || !Number.isInteger(data.selectedLine)) throw new Error("selectedLine must be an integer.");
     if (data.selectedLine < 0 || data.selectedLine >= MAX_LINES) throw new Error("selectedLine is out of range.");
@@ -1179,6 +1262,8 @@ function App() {
       programName: data.programName,
       lineCount: data.lineCount,
       patternTimingMode,
+      scalePresetId,
+      scaleRoot,
       tempo: data.tempo,
       selectedLine: Math.min(data.selectedLine, data.lineCount - 1),
       lines: normalizedLines,
@@ -1194,6 +1279,8 @@ function App() {
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
       setPatternTimingMode(parsed.patternTimingMode);
+      setScalePresetId(parsed.scalePresetId ?? "off");
+      setScaleRoot(parsed.scaleRoot ?? "C");
       setTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
@@ -1577,6 +1664,8 @@ function App() {
       programName: trimmed,
       lineCount,
       patternTimingMode: defaultTimingMode,
+      scalePresetId: "off",
+      scaleRoot: "C",
       tempo,
       selectedLine: 0,
       lines: Array.from({ length: MAX_LINES }, () => ({
@@ -1634,6 +1723,8 @@ function App() {
       programName: "Untitled",
       lineCount,
       patternTimingMode: defaultTimingMode,
+      scalePresetId: "off",
+      scaleRoot: "C",
       tempo,
       selectedLine: 0,
       lines: Array.from({ length: MAX_LINES }, () => ({
@@ -1670,6 +1761,8 @@ function App() {
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
       setPatternTimingMode(parsed.patternTimingMode);
+      setScalePresetId(parsed.scalePresetId ?? "off");
+      setScaleRoot(parsed.scaleRoot ?? "C");
       setTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
@@ -1884,6 +1977,15 @@ function App() {
   const modifiersToggleLabel = "Mods";
   const patternTimingLabel = patternTimingMode === "normal" ? "♪" : "♪₃";
   const patternTimingAriaLabel = patternTimingMode === "normal" ? "Regular note timing" : "Triplet note timing";
+  const scaleEnabled = scalePresetId !== "off";
+  const scalePitchClasses = scaleEnabled ? buildScalePitchClassSet(scaleRoot, scalePresetId) : null;
+  const getPitchHighlightClass = (pitch: PitchName) => {
+    if (!scalePitchClasses) return "";
+    const pitchClass = toPitchClass(pitch);
+    if (pitchClass === scaleRoot) return "scale-root";
+    if (scalePitchClasses.has(pitchClass)) return "scale-member";
+    return "";
+  };
   const synthLabels = isMobileViewport
     ? { resonance: "RES", envMod: "ENV", accent: "ACC", volume: "VOL", delayTime: "TIME", feedback: "FDBK", delayMix: "MIX", distortion: "DIST", reverb: "REV" }
     : { resonance: "Resonance", envMod: "Env Mod", accent: "Accent", volume: "Volume", delayTime: "Delay Time", feedback: "Feedback", delayMix: "Delay Mix", distortion: "Distortion", reverb: "Reverb" };
@@ -2009,6 +2111,31 @@ function App() {
                   <option key={pattern.id} value={pattern.id}>
                     {pattern.name}
                   </option>
+                ))}
+              </select>
+            </label>
+            <label className="header-program header-scale-root">
+              Root
+              <select value={scaleRoot} onChange={(e) => setScaleRoot(e.currentTarget.value as PitchClass)} disabled={!scaleEnabled}>
+                {PITCH_CLASSES.map((pitchClass) => (
+                  <option key={pitchClass} value={pitchClass}>
+                    {pitchClass}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="header-program header-scale-select">
+              Scale
+              <select value={scalePresetId} onChange={(e) => setScalePresetId(e.currentTarget.value)}>
+                <option value="off">Off</option>
+                {SCALE_PRESET_GROUPS.map(([group, presets]) => (
+                  <optgroup key={group} label={group}>
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>
@@ -2238,12 +2365,16 @@ function App() {
             <div className="roll-grid">
               {PITCHES.map((pitch) => (
                 <div key={pitch} className="roll-row">
-                  <div className="pitch-col">{pitch}</div>
+                  <div className={`pitch-col ${getPitchHighlightClass(pitch)}`}>{pitch}</div>
                   {Array.from({ length: patternLength }, (_, s) => {
                     const step = lines[selectedLine].steps[s];
                     const isNote = step.timeMode === "note" && step.pitch === pitch;
                     return (
-                      <button key={`${pitch}-${s}`} className={`cell ${isNote ? "note" : ""}`} onClick={() => placePitch(selectedLine, s, pitch)}>
+                      <button
+                        key={`${pitch}-${s}`}
+                        className={`cell ${isNote ? "note" : ""} ${getPitchHighlightClass(pitch)}`.trim()}
+                        onClick={() => placePitch(selectedLine, s, pitch)}
+                      >
                         {isNote ? "■" : ""}
                       </button>
                     );

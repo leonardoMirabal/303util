@@ -141,6 +141,16 @@ body {
   min-width: 120px;
 }
 
+.header-scale-root select {
+  width: 68px;
+  min-width: 68px;
+}
+
+.header-scale-select select {
+  width: 156px;
+  min-width: 156px;
+}
+
 .header-storage-menu {
   width: 220px;
   min-width: 220px;
@@ -458,6 +468,16 @@ button.selected {
   padding: 2px 3px;
 }
 
+.pitch-col.scale-member {
+  background: #233244;
+  color: #cfe6fb;
+}
+
+.pitch-col.scale-root {
+  background: #4d421f;
+  color: #fff2be;
+}
+
 .step-head {
   padding: 1px 0;
   text-align: center;
@@ -523,11 +543,33 @@ button.selected {
   font-size: 0.52rem;
 }
 
+.cell.scale-member {
+  background: #172331;
+  border-color: #2d455a;
+}
+
+.cell.scale-root {
+  background: #29210f;
+  border-color: #736130;
+}
+
 .cell.note {
   background: #e0e4ea;
   border-color: #f9fbff;
   color: #0e1013;
   font-weight: 700;
+}
+
+.cell.note.scale-member {
+  background: #85aeca;
+  border-color: #deeffc;
+  color: #0d151b;
+}
+
+.cell.note.scale-root {
+  background: #f0d66c;
+  border-color: #fff3c0;
+  color: #151103;
 }
 
 .preview-actions {
@@ -837,6 +879,16 @@ button.selected {
     min-width: 78px;
     height: 24px;
     padding: 0 4px;
+  }
+
+  .header-scale-root select {
+    width: 54px;
+    min-width: 54px;
+  }
+
+  .header-scale-select select {
+    width: 114px;
+    min-width: 114px;
   }
 
   .header-actions input,
