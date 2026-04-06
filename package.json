@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:release-artifacts": "bash ./build-release-artifacts.sh",
     "tauri:dev": "bash ./prepare-dev-index.sh && npm run tauri dev",
     "publish:pages": "bash ./publish-pages.sh",
     "preview": "vite preview",

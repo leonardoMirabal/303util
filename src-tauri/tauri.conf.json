@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.app.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "bash ./prepare-dev-index.sh && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "bash ./prepare-dev-index.sh && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
