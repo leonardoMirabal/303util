@@ -632,6 +632,7 @@ function App() {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleSyncStatus, setGoogleSyncStatus] = useState<"idle" | "connecting" | "syncing" | "ready">("idle");
   const [googleSyncMessage, setGoogleSyncMessage] = useState("");
+  const [isLibraryPickerOpen, setIsLibraryPickerOpen] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1835,30 +1836,7 @@ function App() {
       return;
     }
     if (action === "set-library") {
-      const currentLibraryName = libraries.find((library) => library.id === selectedLibraryId)?.name ?? selectedLibraryId;
-      const libraryList = libraries
-        .map((library, index) => `${index + 1}. ${library.name}${library.id === selectedLibraryId ? " (current)" : ""} [${library.id}]`)
-        .join("\n");
-      const value = window.prompt(`Choose library by number, name, or id:\n\n${libraryList}`, currentLibraryName);
-      if (value === null) return;
-      const needle = value.trim().toLowerCase();
-      if (!needle) return;
-      const numericChoice = Number(needle);
-      let nextLibrary =
-        Number.isInteger(numericChoice) && numericChoice >= 1 && numericChoice <= libraries.length ? libraries[numericChoice - 1] : undefined;
-      if (!nextLibrary) {
-        nextLibrary = libraries.find((library) => library.id.toLowerCase() === needle || library.name.toLowerCase() === needle);
-      }
-      if (!nextLibrary) {
-        nextLibrary = libraries.find(
-          (library) => library.id.toLowerCase().includes(needle) || library.name.toLowerCase().includes(needle),
-        );
-      }
-      if (!nextLibrary) {
-        window.alert("Library not found.");
-        return;
-      }
-      setSelectedLibraryId(nextLibrary.id);
+      setIsLibraryPickerOpen(true);
       return;
     }
     if (action === "export-json") {
@@ -2081,6 +2059,39 @@ function App() {
 
   return (
     <main className="app">
+      {isLibraryPickerOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setIsLibraryPickerOpen(false)}>
+          <div
+            className="modal-card library-picker-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-picker-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="library-picker-title">Choose library</h2>
+              <button type="button" onClick={() => setIsLibraryPickerOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="library-picker-list">
+              {libraries.map((library) => (
+                <button
+                  key={library.id}
+                  type="button"
+                  className={library.id === selectedLibraryId ? "selected" : ""}
+                  onClick={() => {
+                    setSelectedLibraryId(library.id);
+                    setIsLibraryPickerOpen(false);
+                  }}
+                >
+                  {library.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {shouldShowRotateOverlay ? (
         <div className="rotate-overlay">
           <p>Rotate your phone to landscape to use 303 util.</p>

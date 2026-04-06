@@ -45,6 +45,57 @@ body {
   box-shadow: none;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding:
+    max(16px, calc(env(safe-area-inset-top, 0px) + 12px))
+    max(16px, calc(env(safe-area-inset-right, 0px) + 12px))
+    max(16px, calc(env(safe-area-inset-bottom, 0px) + 12px))
+    max(16px, calc(env(safe-area-inset-left, 0px) + 12px));
+  background: rgb(10 12 14 / 72%);
+}
+
+.modal-card {
+  width: min(420px, 100%);
+  max-height: min(70dvh, 520px);
+  overflow: auto;
+  border: 1px solid #7e8894;
+  border-radius: 8px;
+  background: #2f353d;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 40%);
+  padding: 10px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #f7fafc;
+}
+
+.library-picker-list {
+  display: grid;
+  gap: 6px;
+}
+
+.library-picker-list button {
+  width: 100%;
+  min-height: 36px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
 .rotate-overlay {
   display: none;
 }
