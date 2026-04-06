@@ -331,6 +331,12 @@ button.selected {
   font-weight: 700;
 }
 
+.tempo-action-button.is-active {
+  background: #8a3b3b;
+  border-color: #d46a6a;
+  color: #fff4f4;
+}
+
 .wave-toggle {
   display: flex;
 }

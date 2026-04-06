@@ -154,6 +154,8 @@ const LIBRARIES_STORE = "libraries";
 const PATTERNS_STORE = "patterns";
 const LAST_LIBRARY_ID_KEY = "tb303:last-library-id";
 const LAST_PATTERN_ID_KEY = "tb303:last-pattern-id";
+const MIN_TEMPO = 1;
+const MAX_TEMPO = 180;
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const DRIVE_BACKUP_FOLDER_NAME = "TB-303 Companion Backups";
@@ -633,9 +635,12 @@ const getLatestUpdatedAt = (libraries: LibraryRecord[], patterns: PatternRecord[
   return Math.max(latestLibrary, latestPattern);
 };
 
+const clampTempo = (value: number): number => Math.min(MAX_TEMPO, Math.max(MIN_TEMPO, Math.round(value)));
+
 function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
+  const [halfTempoBase, setHalfTempoBase] = useState<number | null>(null);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
   const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId ?? "off");
   const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot ?? "C");
@@ -912,8 +917,26 @@ function App() {
     setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
   };
 
-  const halveTempo = () => {
-    setTempo((prev) => Math.max(1, Math.round(prev / 2)));
+  const setProjectTempo = (value: number) => {
+    setHalfTempoBase(null);
+    setTempo(clampTempo(value));
+  };
+
+  const setTempoFromKnob = (value: number) => {
+    const nextTempo = clampTempo(value);
+    setTempo(nextTempo);
+    setHalfTempoBase((prev) => (prev === null ? null : clampTempo(nextTempo * 2)));
+  };
+
+  const toggleHalfTempo = () => {
+    if (halfTempoBase === null) {
+      setHalfTempoBase(tempo);
+      setTempo(clampTempo(tempo / 2));
+      return;
+    }
+
+    setTempo(halfTempoBase);
+    setHalfTempoBase(null);
   };
 
   const applyPatternTimingMode = (mode: PatternTimingMode) => {
@@ -1425,7 +1448,7 @@ function App() {
       setLineCount(parsed.lineCount);
       setScalePresetId(parsed.scalePresetId ?? "off");
       setScaleRoot(parsed.scaleRoot ?? "C");
-      setTempo(parsed.tempo);
+      setProjectTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
     } catch (error) {
@@ -1863,7 +1886,7 @@ function App() {
       setLineCount(parsed.lineCount);
       setScalePresetId(parsed.scalePresetId ?? "off");
       setScaleRoot(parsed.scaleRoot ?? "C");
-      setTempo(parsed.tempo);
+      setProjectTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
       setLines(parsed.lines);
     } catch (error) {
@@ -2011,7 +2034,7 @@ function App() {
     setLineCount(resetProject.lineCount);
     setScalePresetId(resetProject.scalePresetId ?? "off");
     setScaleRoot(resetProject.scaleRoot ?? "C");
-    setTempo(resetProject.tempo);
+    setProjectTempo(resetProject.tempo);
     setSelectedLine(resetProject.selectedLine);
     setLines(resetProject.lines);
   };
@@ -2348,9 +2371,15 @@ function App() {
                   <div className="leading-controls">
                     <div className="tempo-controls">
                       <div className="bpm-knob-slot">
-                        <KnobControl label="BPM" min={1} max={180} value={tempo} onChange={setTempo} />
+                        <KnobControl label="BPM" min={MIN_TEMPO} max={MAX_TEMPO} value={tempo} onChange={setTempoFromKnob} />
                       </div>
-                      <button type="button" className="tempo-action-button" onClick={halveTempo} aria-label="Halve BPM">
+                      <button
+                        type="button"
+                        className={`tempo-action-button${halfTempoBase === null ? "" : " is-active"}`}
+                        onClick={toggleHalfTempo}
+                        aria-label="Toggle half tempo"
+                        aria-pressed={halfTempoBase !== null}
+                      >
                         1/2
                       </button>
                     </div>
@@ -2416,9 +2445,15 @@ function App() {
                   <div className="leading-controls desktop-leading-controls">
                     <div className="tempo-controls">
                       <div className="bpm-knob-slot desktop-bpm-knob-slot">
-                        <KnobControl label="BPM" min={1} max={180} value={tempo} onChange={setTempo} />
+                        <KnobControl label="BPM" min={MIN_TEMPO} max={MAX_TEMPO} value={tempo} onChange={setTempoFromKnob} />
                       </div>
-                      <button type="button" className="tempo-action-button" onClick={halveTempo} aria-label="Halve BPM">
+                      <button
+                        type="button"
+                        className={`tempo-action-button${halfTempoBase === null ? "" : " is-active"}`}
+                        onClick={toggleHalfTempo}
+                        aria-label="Toggle half tempo"
+                        aria-pressed={halfTempoBase !== null}
+                      >
                         1/2
                       </button>
                     </div>
