@@ -368,7 +368,8 @@ When the connection succeeds, the app checks Google Drive for the latest backup.
 **Configuration note**
 
 - The browser build uses `VITE_GOOGLE_CLIENT_ID`.
-- The installed desktop app uses `VITE_GOOGLE_DESKTOP_CLIENT_ID`.
+- Installed app builds use `VITE_GOOGLE_DESKTOP_CLIENT_ID` as the native Google client id passed to the app.
+- On Android, Google Cloud must also have a separate **Android** OAuth client for package verification with package name `com.app.app` and the APK signing SHA-1. That Android client is not passed through Vite env vars.
 
 ### What happens when you connect
 

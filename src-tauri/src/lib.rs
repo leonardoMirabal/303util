@@ -198,6 +198,7 @@ async fn desktop_google_drive_access_token(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![desktop_google_drive_access_token])
         .run(tauri::generate_context!())

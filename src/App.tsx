@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import "./App.css";
 
 const STEPS = 16;
@@ -699,6 +700,7 @@ function App() {
   });
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? "";
   const googleDesktopClientId = (import.meta.env.VITE_GOOGLE_DESKTOP_CLIENT_ID as string | undefined)?.trim() ?? "";
+  const isAndroidTauriApp = isTauri() && /\bAndroid\b/i.test(window.navigator.userAgent);
 
   const buildDriveSignature = (payload: DriveBackupPayload): string =>
     `${payload.latestUpdatedAt}|${payload.selectedLibraryId}|${payload.selectedPatternId}|${payload.libraries.length}|${payload.patterns.length}`;
@@ -707,6 +709,22 @@ function App() {
     if (isTauri()) {
       if (!googleDesktopClientId) {
         throw new Error("Google sync is not configured for the installed app. Missing VITE_GOOGLE_DESKTOP_CLIENT_ID.");
+      }
+      if (isAndroidTauriApp) {
+        const tokenResponse =
+          prompt === "consent"
+            ? await signInWithNativeGoogle({
+                clientId: googleDesktopClientId,
+                scopes: [GOOGLE_SCOPE],
+              })
+            : await refreshNativeGoogleToken({
+                clientId: googleDesktopClientId,
+                scopes: [GOOGLE_SCOPE],
+              });
+        if (!tokenResponse.accessToken) {
+          throw new Error("Google sign-in completed without an access token.");
+        }
+        return tokenResponse.accessToken;
       }
       return await invoke<string>("desktop_google_drive_access_token", {
         clientId: googleDesktopClientId,
