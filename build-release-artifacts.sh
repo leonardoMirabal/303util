@@ -7,6 +7,21 @@ WEB_ARTIFACT_DIR="${ARTIFACTS_DIR}/web"
 APK_ARTIFACT_DIR="${ARTIFACTS_DIR}/apk"
 RELEASE_VERSION="${RELEASE_VERSION:-$(node -p "require(process.argv[1]).version" "${SCRIPT_DIR}/package.json")}"
 RELEASE_VERSION="${RELEASE_VERSION#v}"
+ANDROID_BUILD_MODE="debug"
+ANDROID_BUILD_ARGS=(--apk --debug --ci)
+ANDROID_KEYSTORE_FILE=""
+
+cleanup_android_signing() {
+  if [ -n "${ANDROID_KEYSTORE_FILE}" ] && [ -f "${ANDROID_KEYSTORE_FILE}" ]; then
+    rm -f "${ANDROID_KEYSTORE_FILE}"
+  fi
+
+  if [ -f "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties" ]; then
+    rm -f "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties"
+  fi
+}
+
+trap cleanup_android_signing EXIT
 
 write_android_version_properties() {
   local version_core prerelease_suffix prerelease_number android_version_code properties_file
@@ -41,6 +56,36 @@ tauri.android.versionCode=${android_version_code}
 EOF
 }
 
+configure_android_signing() {
+  if [ -n "${ANDROID_KEY_ALIAS:-}" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ] && [ -n "${ANDROID_KEY_BASE64:-}" ]; then
+    ANDROID_BUILD_MODE="release"
+    ANDROID_BUILD_ARGS=(--apk --ci)
+    ANDROID_KEYSTORE_FILE="$(mktemp "${ARTIFACTS_DIR}/android-keystore.XXXXXX.jks")"
+    printf '%s' "${ANDROID_KEY_BASE64}" | base64 --decode > "${ANDROID_KEYSTORE_FILE}"
+    cat > "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties" <<EOF
+keyAlias=${ANDROID_KEY_ALIAS}
+password=${ANDROID_KEY_PASSWORD}
+storeFile=${ANDROID_KEYSTORE_FILE}
+EOF
+    echo "Android signing configured for release APKs."
+  elif [ -n "${ANDROID_KEY_ALIAS:-}" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ] && [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
+    if [ ! -f "${ANDROID_KEYSTORE_PATH}" ]; then
+      echo "Error: ANDROID_KEYSTORE_PATH does not exist: ${ANDROID_KEYSTORE_PATH}"
+      exit 1
+    fi
+    ANDROID_BUILD_MODE="release"
+    ANDROID_BUILD_ARGS=(--apk --ci)
+    cat > "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties" <<EOF
+keyAlias=${ANDROID_KEY_ALIAS}
+password=${ANDROID_KEY_PASSWORD}
+storeFile=${ANDROID_KEYSTORE_PATH}
+EOF
+    echo "Android signing configured for release APKs from local keystore."
+  else
+    echo "Android signing secrets not set. Building installable debug APK."
+  fi
+}
+
 if [ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]; then
   echo "Error: VITE_GOOGLE_CLIENT_ID is required."
   exit 1
@@ -67,7 +112,8 @@ if [ ! -d "${SCRIPT_DIR}/src-tauri/gen/android" ]; then
 fi
 
 write_android_version_properties
-npx tauri android build --apk --ci
+configure_android_signing
+npx tauri android build "${ANDROID_BUILD_ARGS[@]}"
 
 mapfile -t apk_files < <(find "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk" -type f -name "*.apk" | sort)
 
@@ -76,14 +122,23 @@ if [ "${#apk_files[@]}" -eq 0 ]; then
   exit 1
 fi
 
+copied_apk_count=0
 for apk_file in "${apk_files[@]}"; do
+  if [[ "${apk_file}" == *-unsigned.apk ]]; then
+    continue
+  fi
   apk_name="$(basename "${apk_file}")"
   apk_name="${apk_name#app-}"
-  apk_name="${apk_name/-unsigned/}"
   if [[ "${apk_name}" != 303util* ]]; then
     apk_name="303util-${RELEASE_VERSION}-${apk_name}"
   fi
   cp "${apk_file}" "${APK_ARTIFACT_DIR}/${apk_name}"
+  copied_apk_count=$((copied_apk_count + 1))
 done
+
+if [ "${copied_apk_count}" -eq 0 ]; then
+  echo "Error: No installable APK files were found after the ${ANDROID_BUILD_MODE} build."
+  exit 1
+fi
 
 echo "Artifacts ready in ${ARTIFACTS_DIR}"

@@ -50,6 +50,9 @@ jobs:
     env:
       VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
       RELEASE_VERSION: ${{ needs.get-version.outputs.version }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
