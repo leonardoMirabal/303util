@@ -40,6 +40,14 @@ if [ "${#apk_files[@]}" -eq 0 ]; then
   exit 1
 fi
 
-cp "${apk_files[@]}" "${APK_ARTIFACT_DIR}/"
+for apk_file in "${apk_files[@]}"; do
+  apk_name="$(basename "${apk_file}")"
+  apk_name="${apk_name#app-}"
+  apk_name="${apk_name/-unsigned/}"
+  if [[ "${apk_name}" != 303util* ]]; then
+    apk_name="303util-${apk_name}"
+  fi
+  cp "${apk_file}" "${APK_ARTIFACT_DIR}/${apk_name}"
+done
 
 echo "Artifacts ready in ${ARTIFACTS_DIR}"
