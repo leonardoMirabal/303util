@@ -214,6 +214,11 @@ button.selected {
   align-items: center;
 }
 
+.hardware-scroll {
+  width: 100%;
+  min-width: 0;
+}
+
 .knob-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(74px, 1fr));
@@ -332,6 +337,7 @@ button.selected {
   background: #3a4047;
   position: relative;
   box-shadow: none;
+  touch-action: pan-x;
 }
 
 .knob:focus-visible {
@@ -668,12 +674,21 @@ button.selected {
     -webkit-overflow-scrolling: touch;
   }
 
+  .hardware-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    width: 100%;
+  }
+
   .mobile-controls-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     height: 24px;
-    padding: 0 6px;
+    padding: 0 8px;
     font-size: 0.62rem;
     white-space: nowrap;
     flex: 0 0 auto;
@@ -684,7 +699,7 @@ button.selected {
     align-items: center;
     justify-content: center;
     height: 24px;
-    padding: 0 6px;
+    padding: 0 8px;
     font-size: 0.62rem;
     white-space: nowrap;
     flex: 0 0 auto;
@@ -695,7 +710,7 @@ button.selected {
     align-items: center;
     justify-content: center;
     height: 24px;
-    padding: 0 6px;
+    padding: 0 8px;
     font-size: 0.62rem;
     white-space: nowrap;
     flex: 0 0 auto;
@@ -706,7 +721,7 @@ button.selected {
     align-items: center;
     justify-content: center;
     height: 24px;
-    padding: 0 6px;
+    padding: 0 8px;
     font-size: 0.62rem;
     white-space: nowrap;
     flex: 0 0 auto;
@@ -797,11 +812,32 @@ button.selected {
   .header-program select {
     width: 72px;
     min-width: 72px;
+    height: 24px;
+    padding: 0 4px;
+  }
+
+  .header-actions .header-timing-toggle button {
+    width: 40px;
+    min-width: 40px;
+    height: 24px;
+    padding: 0 4px;
+    font-size: 0.78rem;
   }
 
   .header-actions > select {
     width: 78px;
     min-width: 78px;
+    height: 24px;
+    padding: 0 4px;
+  }
+
+  .header-actions input,
+  .header-actions select {
+    height: 24px;
+  }
+
+  .header-actions label {
+    align-items: center;
   }
 
   button,
@@ -814,12 +850,15 @@ button.selected {
 
   .header-primary-actions .play-button {
     width: 52px;
+    height: 24px;
     font-size: 0.72rem;
-    padding: 2px 6px;
+    padding: 0 6px;
   }
 
   .header-primary-actions button {
     width: 52px;
+    height: 24px;
+    padding: 0 6px;
   }
 
   .editor-sheet-row {
@@ -910,12 +949,8 @@ button.selected {
   .knob-groups {
     gap: 2px;
     width: max-content;
-    min-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-    touch-action: pan-x;
-    -webkit-overflow-scrolling: touch;
+    min-width: max-content;
+    overflow: visible;
     padding-bottom: 1px;
   }
 
@@ -939,7 +974,7 @@ button.selected {
   .aux-controls button,
   .view-toggle button {
     height: 24px;
-    padding: 0 5px;
+    padding: 0 8px;
     font-size: 0.62rem;
     white-space: nowrap;
   }
