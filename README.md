@@ -55,7 +55,7 @@ Starts or stops playback of the active project.
 
 ### Reset
 
-Clears the notes and step programming in the editor. Your voice settings, FX settings, and project structure stay in place.
+Restores the built-in default pattern for the current project view. This resets the working pattern back to the app's default starting state.
 
 ### Save
 
@@ -64,12 +64,12 @@ Saves the current working project to the selected pattern.
 - If a saved pattern is already selected, it updates that pattern.
 - If no saved pattern is selected yet, the app asks for a name and creates a new saved pattern.
 
-### Normal / Triplet
+### Timing button (`♪` / `♪₃`)
 
 Switches the timing mode for the project.
 
-- **Normal** mode supports pattern lengths from **4 to 16** steps per voice.
-- **Triplet** mode supports pattern lengths from **4 to 12** steps per voice.
+- **`♪`** = normal timing, with pattern lengths from **4 to 16** steps per voice
+- **`♪₃`** = triplet timing, with pattern lengths from **4 to 12** steps per voice
 
 If you switch timing mode and a voice is longer than the new limit, its visible length is reduced automatically.
 
@@ -95,6 +95,7 @@ Turns scale mode **Off** or loads one of the available scales or chord shapes.
 
 - Choose **Off** if you do not want note highlighting.
 - Choose any scale preset to highlight notes that belong to that scale.
+- The selector shows the current preset name, for example **Harmonic Minor**.
 - The selected root note uses one highlight color.
 - The rest of the notes that belong to the selected scale use a second highlight color.
 
