@@ -1,8 +1,6 @@
 # 303 util User Manual
 
-**303 util** is a compact TB-303 pattern editor, playback tool, and printable pattern-sheet generator. This manual is written for end users and covers the full app workflow: creating libraries, building patterns, working with 1-3 voices, exporting sheets, saving and opening project files, and backing up your saved work to Google Drive.
-
-**Sound engine reference:** the synth engine in 303 util is based on ideas from **JS303**, an open-source TB-303 clone by Emil Loer: <https://github.com/thedjinn/js303>
+**303 util** is a compact TB-303 pattern editor, playback tool, and printable pattern-sheet generator. This manual is written for end users and covers the full app workflow: creating libraries, building patterns, working with 1-3 voices, using scale mode, exporting sheets, saving and opening project files, and backing up your saved work to Google Drive.
 
 ![303 util main screen](docs/screenshots/overview-main.png)
 
@@ -26,7 +24,7 @@ The app is organized into four working areas:
 
 | Area | What it does |
 | --- | --- |
-| **Top bar** | Playback, reset, save, timing mode, program name, pattern selection, and the main menu |
+| **Top bar** | Playback, reset, save, timing mode, program name, pattern selection, root note, scale mode, and the main menu |
 | **Controls** | BPM, waveform, synth settings, and FX for the selected voice |
 | **Editor** | Pitch grid and step controls for building the sequence |
 | **Sheet** | Generates a clean export of the active project as a PNG |
@@ -83,6 +81,23 @@ This is the name of the current working project. It is also used in exported fil
 
 Shows saved patterns in the currently selected library. Selecting one opens it immediately.
 
+### Root
+
+Chooses the root note used by **Scale** mode.
+
+- The root selector is available in the top bar.
+- It becomes active when a scale is selected.
+- The root note row in the editor is highlighted with its own color.
+
+### Scale
+
+Turns scale mode **Off** or loads one of the available scales or chord shapes.
+
+- Choose **Off** if you do not want note highlighting.
+- Choose any scale preset to highlight notes that belong to that scale.
+- The selected root note uses one highlight color.
+- The rest of the notes that belong to the selected scale use a second highlight color.
+
 ### Menu...
 
 This is where project management and storage actions live:
@@ -91,6 +106,7 @@ This is where project management and storage actions live:
 - **Length**
 - **Library**
 - **Export JSON**
+- **Export PNG**
 - **Import JSON**
 - **New Pattern**
 - **Save Pattern**
@@ -208,6 +224,22 @@ In **Editor** view, the selected voice is edited step by step.
 ### Add or remove notes
 
 Click a cell in the pitch grid to place a note on that step.
+
+### Use scale mode while editing
+
+If you want visual note guidance:
+
+1. Choose a **Scale** in the top bar
+2. Choose a **Root**
+3. Return to the pitch grid and place notes as usual
+
+What you will see:
+
+- the **root note row** is highlighted in its own color
+- the other **notes inside the selected scale** are highlighted in a different color
+- notes outside the scale stay unhighlighted
+
+Scale mode is a visual guide only. It does not block you from placing notes outside the highlighted rows.
 
 ### Choose the step type
 
