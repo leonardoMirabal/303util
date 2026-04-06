@@ -140,6 +140,11 @@ body {
   min-width: 178px;
 }
 
+.header-library-select select {
+  width: 132px;
+  min-width: 132px;
+}
+
 .header-pattern-select select {
   width: 120px;
   min-width: 120px;
@@ -892,6 +897,11 @@ button.selected {
   .header-scale-root select {
     width: 54px;
     min-width: 54px;
+  }
+
+  .header-library-select select {
+    width: 96px;
+    min-width: 96px;
   }
 
   .header-scale-select select {

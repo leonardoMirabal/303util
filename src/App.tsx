@@ -1836,11 +1836,24 @@ function App() {
     }
     if (action === "set-library") {
       const currentLibraryName = libraries.find((library) => library.id === selectedLibraryId)?.name ?? selectedLibraryId;
-      const value = window.prompt("Library name or id", currentLibraryName);
+      const libraryList = libraries
+        .map((library, index) => `${index + 1}. ${library.name}${library.id === selectedLibraryId ? " (current)" : ""} [${library.id}]`)
+        .join("\n");
+      const value = window.prompt(`Choose library by number, name, or id:\n\n${libraryList}`, currentLibraryName);
       if (value === null) return;
       const needle = value.trim().toLowerCase();
       if (!needle) return;
-      const nextLibrary = libraries.find((library) => library.id.toLowerCase() === needle || library.name.toLowerCase() === needle);
+      const numericChoice = Number(needle);
+      let nextLibrary =
+        Number.isInteger(numericChoice) && numericChoice >= 1 && numericChoice <= libraries.length ? libraries[numericChoice - 1] : undefined;
+      if (!nextLibrary) {
+        nextLibrary = libraries.find((library) => library.id.toLowerCase() === needle || library.name.toLowerCase() === needle);
+      }
+      if (!nextLibrary) {
+        nextLibrary = libraries.find(
+          (library) => library.id.toLowerCase().includes(needle) || library.name.toLowerCase().includes(needle),
+        );
+      }
       if (!nextLibrary) {
         window.alert("Library not found.");
         return;
@@ -2100,6 +2113,16 @@ function App() {
               <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
             </label>
             <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
+            <label className="header-program header-library-select">
+              Library
+              <select value={selectedLibraryId} onChange={(e) => setSelectedLibraryId(e.currentTarget.value)}>
+                {libraries.map((library) => (
+                  <option key={library.id} value={library.id}>
+                    {library.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="header-program header-pattern-select">
               Pattern
               <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
