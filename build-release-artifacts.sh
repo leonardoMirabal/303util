@@ -131,6 +131,11 @@ if [ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]; then
   exit 1
 fi
 
+if [ -z "${VITE_GOOGLE_DESKTOP_CLIENT_ID:-}" ]; then
+  echo "Error: VITE_GOOGLE_DESKTOP_CLIENT_ID is required."
+  exit 1
+fi
+
 mkdir -p "${ARTIFACTS_DIR}"
 rm -rf "${WEB_ARTIFACT_DIR}" "${APK_ARTIFACT_DIR}"
 mkdir -p "${WEB_ARTIFACT_DIR}" "${APK_ARTIFACT_DIR}"
