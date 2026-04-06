@@ -14,7 +14,11 @@ write_source_index() {
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="apple-touch-icon" href="/app-thumbnail.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2b3037" />
+    <meta property="og:image" content="/app-thumbnail.png" />
+    <meta name="twitter:image" content="/app-thumbnail.png" />
     <title>303 util</title>
   </head>
 
@@ -50,6 +54,10 @@ if [ -f "${DIST_DIR}/vite.svg" ]; then
   cp -f "${DIST_DIR}/vite.svg" "${PAGES_DIR}/vite.svg"
 fi
 
+if [ -f "${DIST_DIR}/app-thumbnail.png" ]; then
+  cp -f "${DIST_DIR}/app-thumbnail.png" "${PAGES_DIR}/app-thumbnail.png"
+fi
+
 if [ -f "${DIST_DIR}/tauri.svg" ]; then
   cp -f "${DIST_DIR}/tauri.svg" "${PAGES_DIR}/tauri.svg"
 fi
@@ -60,7 +68,7 @@ fi
 cp -R "${DIST_DIR}/assets" "${PAGES_DIR}/assets"
 
 echo "Staging publish files..."
-git add -A index.html assets vite.svg tauri.svg
+git add -A index.html assets vite.svg app-thumbnail.png tauri.svg
 
 echo "Done. Next:"
 echo "  cd ${PAGES_DIR}"
