@@ -261,7 +261,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   scalePresetId: "off",
   scaleRoot: "C",
   tempo: 126,
-  selectedLine: 1,
+  selectedLine: 0,
   lines: [
     {
       patternLength: 8,
