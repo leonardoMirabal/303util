@@ -396,8 +396,6 @@ Unsaved edits in the current pattern are **not** part of the library backup yet.
 
 303 util also works in a compact layout.
 
-![Mobile editor layout](docs/screenshots/mobile-editor.png)
-
 On smaller screens:
 
 - use **Controls** to show or hide the sound section
