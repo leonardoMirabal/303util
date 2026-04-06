@@ -26,6 +26,11 @@ cp -R "${SCRIPT_DIR}/dist/." "${WEB_ARTIFACT_DIR}/"
 )
 
 echo "Building Android APK..."
+if [ ! -d "${SCRIPT_DIR}/src-tauri/gen/android" ]; then
+  echo "Initializing Android project..."
+  npx tauri android init --ci --skip-targets-install
+fi
+
 npx tauri android build --apk --ci
 
 mapfile -t apk_files < <(find "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk" -type f -name "*.apk" | sort)
