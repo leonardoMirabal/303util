@@ -52,6 +52,7 @@ type VoiceParams = {
 };
 
 type LineState = {
+  timingMode: PatternTimingMode;
   patternLength: number;
   steps: Step[];
   params: VoiceParams;
@@ -77,10 +78,8 @@ type ProjectData = {
   version: 1;
   programName: string;
   lineCount: 1 | 2 | 3;
-  patternTimingMode: PatternTimingMode;
   scalePresetId?: string;
   scaleRoot?: PitchClass;
-  patternLength?: number;
   tempo: number;
   selectedLine: number;
   lines: LineState[];
@@ -242,6 +241,7 @@ const defaultParams = (): VoiceParams => ({
 });
 
 const makeLine = (): LineState => ({
+  timingMode: "normal",
   patternLength: 8,
   steps: Array.from({ length: STEPS }, () => ({
     pitch: null,
@@ -257,13 +257,13 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   version: 1,
   programName: "pattern 1",
   lineCount: 2,
-  patternTimingMode: "normal",
   scalePresetId: "off",
   scaleRoot: "C",
   tempo: 126,
   selectedLine: 0,
   lines: [
     {
+      timingMode: "normal",
       patternLength: 8,
       steps: [
         { pitch: "C3", timeMode: "note", accent: true, slide: false, transpose: "down" },
@@ -295,6 +295,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
       },
     },
     {
+      timingMode: "normal",
       patternLength: 8,
       steps: Array.from({ length: STEPS }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
       params: {
@@ -316,6 +317,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
       },
     },
     {
+      timingMode: "normal",
       patternLength: 8,
       steps: Array.from({ length: STEPS }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
       params: defaultParams(),
@@ -561,9 +563,22 @@ const mapLegacyPatternLength = (raw: unknown): number => {
   return Math.max(4, Math.min(16, raw));
 };
 
-const maxPatternLengthForMode = (mode: PatternTimingMode): number => (mode === "triplet" ? 12 : 16);
+const isTripletDisabledStep = (stepIndex: number): boolean => (stepIndex + 1) % 4 === 0;
+
+const isStepDisabledForTimingMode = (stepIndex: number, mode: PatternTimingMode): boolean => mode === "triplet" && isTripletDisabledStep(stepIndex);
+
+const playableStepIndicesForLength = (patternLength: number, mode: PatternTimingMode): number[] =>
+  Array.from({ length: patternLength }, (_, stepIndex) => stepIndex).filter((stepIndex) => !isStepDisabledForTimingMode(stepIndex, mode));
+
+const maxPatternLengthForMode = (_mode: PatternTimingMode): number => 16;
 
 const clampPatternLength = (length: number, mode: PatternTimingMode): number => Math.max(4, Math.min(maxPatternLengthForMode(mode), length));
+
+const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
+
+const schedulerTickMs = (tempo: number): number => (60 / tempo) * (1000 / 12);
+
+const schedulerTicksPerStep = (mode: PatternTimingMode): number => (mode === "triplet" ? 4 : 3);
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -599,7 +614,6 @@ function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
-  const [patternTimingMode, setPatternTimingMode] = useState<PatternTimingMode>(DEFAULT_PROJECT_STATE.patternTimingMode);
   const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId ?? "off");
   const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot ?? "C");
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
@@ -636,14 +650,14 @@ function App() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
-  const stepRef = useRef(0);
+  const voiceStepRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
+  const voiceTickRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const timerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
   const lineFxRef = useRef<Array<LineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
-  const patternTimingModeRef = useRef(patternTimingMode);
   const restoredPatternRef = useRef(false);
   const googleSyncEnabledRef = useRef(false);
   const hasLoadedLocalDataRef = useRef(false);
@@ -655,7 +669,6 @@ function App() {
     version: 1,
     programName,
     lineCount,
-    patternTimingMode,
     scalePresetId,
     scaleRoot,
     tempo,
@@ -760,6 +773,7 @@ function App() {
   };
 
   const placePitch = (lineIndex: number, stepIndex: number, pitch: PitchName) => {
+    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -780,6 +794,7 @@ function App() {
   };
 
   const setStepMode = (lineIndex: number, stepIndex: number, mode: TimeMode) => {
+    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -799,6 +814,7 @@ function App() {
   };
 
   const toggleFlag = (lineIndex: number, stepIndex: number, flag: "accent" | "slide") => {
+    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -815,6 +831,7 @@ function App() {
   };
 
   const toggleTranspose = (lineIndex: number, stepIndex: number, mode: Transpose) => {
+    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -840,25 +857,32 @@ function App() {
   };
 
   const updateVoicePatternLength = (value: number) => {
-    const nextLength = clampPatternLength(value, patternTimingMode);
+    const selectedTimingMode = lines[selectedLine]?.timingMode ?? "normal";
+    const nextLength = clampPatternLength(value, selectedTimingMode);
     setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
   };
 
   const applyPatternTimingMode = (mode: PatternTimingMode) => {
-    if (mode === patternTimingMode) return;
-    setPatternTimingMode(mode);
+    if (mode === lines[selectedLine]?.timingMode) return;
     setLines((prev) =>
-      prev.map((line) => ({
-        ...line,
-        patternLength: clampPatternLength(line.patternLength, mode),
-      })),
+      prev.map((line, lineIndex) =>
+        lineIndex === selectedLine
+          ? {
+              ...line,
+              timingMode: mode,
+              patternLength: clampPatternLength(line.patternLength, mode),
+            }
+          : line,
+      ),
     );
     setPlayhead(-1);
-    stepRef.current = 0;
+    voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
   };
 
   const togglePatternTimingMode = () => {
-    applyPatternTimingMode(patternTimingMode === "normal" ? "triplet" : "normal");
+    const nextMode = (lines[selectedLine]?.timingMode ?? "normal") === "normal" ? "triplet" : "normal";
+    applyPatternTimingMode(nextMode);
   };
 
   const playStep = (lineIndex: number, line: LineState, stepIndex: number, stepLenSeconds: number) => {
@@ -874,6 +898,7 @@ function App() {
 
     let noteSteps = 1;
     for (let s = stepIndex + 1; s < line.patternLength; s += 1) {
+      if (isStepDisabledForTimingMode(s, line.timingMode)) break;
       if (line.steps[s].timeMode === "tie") noteSteps += 1;
       else break;
     }
@@ -890,7 +915,10 @@ function App() {
     osc.frequency.setValueAtTime(freq, now);
 
     if (step.slide) {
-      const prevIdx = (stepIndex - 1 + line.patternLength) % line.patternLength;
+      let prevIdx = (stepIndex - 1 + line.patternLength) % line.patternLength;
+      while (prevIdx !== stepIndex && isStepDisabledForTimingMode(prevIdx, line.timingMode)) {
+        prevIdx = (prevIdx - 1 + line.patternLength) % line.patternLength;
+      }
       const prevBase = findBaseStep(line.steps, prevIdx);
       if (prevBase !== null) {
         const prevStep = line.steps[prevBase];
@@ -944,9 +972,6 @@ function App() {
   useEffect(() => {
     lineCountRef.current = lineCount;
   }, [lineCount]);
-  useEffect(() => {
-    patternTimingModeRef.current = patternTimingMode;
-  }, [patternTimingMode]);
   useEffect(() => {
     setSelectedLine((prev) => Math.min(prev, lineCount - 1));
   }, [lineCount]);
@@ -1042,18 +1067,32 @@ function App() {
       timerRef.current = null;
     }
 
-    const stepMs = patternTimingModeRef.current === "triplet" ? (60 / tempo) * (1000 / 3) : (60 / tempo) * 250;
-    const stepSec = stepMs / 1000;
+    voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    const stepMs = schedulerTickMs(tempo);
     const tick = () => {
-      const step = stepRef.current;
       const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
-        const voiceLength = clampPatternLength(linesNow[li].patternLength, patternTimingModeRef.current);
-        playStep(li, linesNow[li], step % voiceLength, stepSec);
+        const line = linesNow[li];
+        const ticksPerStep = schedulerTicksPerStep(line.timingMode);
+        if (voiceTickRef.current[li] % ticksPerStep !== 0) {
+          voiceTickRef.current[li] += 1;
+          continue;
+        }
+        const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
+        const playableSteps = playableStepIndicesForLength(voiceLength, line.timingMode);
+        if (playableSteps.length === 0) {
+          voiceTickRef.current[li] += 1;
+          continue;
+        }
+        const stepIndex = playableSteps[voiceStepRef.current[li] % playableSteps.length];
+        playStep(li, line, stepIndex, stepSecondsForTimingMode(tempo, line.timingMode));
+        if (li === selectedLine) {
+          setPlayhead(stepIndex);
+        }
+        voiceStepRef.current[li] += 1;
+        voiceTickRef.current[li] += 1;
       }
-      const selectedVoiceLength = clampPatternLength(linesNow[selectedLine]?.patternLength ?? 8, patternTimingModeRef.current);
-      setPlayhead(step % selectedVoiceLength);
-      stepRef.current = step + 1;
     };
     tick();
     timerRef.current = window.setInterval(tick, stepMs);
@@ -1063,7 +1102,7 @@ function App() {
         timerRef.current = null;
       }
     };
-  }, [isPlaying, tempo, selectedLine, patternTimingMode]);
+  }, [isPlaying, tempo, selectedLine]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1147,12 +1186,12 @@ function App() {
     for (let voiceIndex = 0; voiceIndex < exportVoices; voiceIndex += 1) {
       const voice = lines[voiceIndex];
       const voiceTop = 120 + voiceIndex * voiceBlockHeight;
-      const voiceLength = clampPatternLength(voice.patternLength, patternTimingMode);
+      const voiceLength = clampPatternLength(voice.patternLength, voice.timingMode);
       const active = voice.steps.slice(0, voiceLength);
       const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / voiceLength);
 
       ctx.font = "bold 16px Arial";
-      ctx.fillText(`VOICE ${voiceIndex + 1}`, left, voiceTop - 8);
+      ctx.fillText(`VOICE ${voiceIndex + 1} (${voice.timingMode === "triplet" ? "Triplet" : "Normal"})`, left, voiceTop - 8);
       ctx.font = "13px Arial";
 
       voiceRows.forEach((row, r) => {
@@ -1162,6 +1201,13 @@ function App() {
         for (let i = 0; i < voiceLength; i += 1) {
           const x = left + labelWidth + i * colWidth;
           ctx.strokeRect(x, y, colWidth, rowHeight);
+          if (isStepDisabledForTimingMode(i, voice.timingMode)) {
+            ctx.save();
+            ctx.fillStyle = "#d8dce1";
+            ctx.fillRect(x + 1, y + 1, colWidth - 2, rowHeight - 2);
+            ctx.restore();
+            continue;
+          }
           const step = active[i];
           let value = "";
           if (row === "STEP") value = String(i + 1);
@@ -1227,8 +1273,6 @@ function App() {
     if (data.version !== 1) throw new Error("Unsupported JSON version.");
     if (typeof data.programName !== "string") throw new Error("programName must be a string.");
     if (data.lineCount !== 1 && data.lineCount !== 2 && data.lineCount !== 3) throw new Error("voiceCount must be 1, 2, or 3.");
-    const patternTimingMode: PatternTimingMode =
-      data.patternTimingMode === "triplet" || data.patternTimingMode === "normal" ? data.patternTimingMode : "normal";
     const scalePresetId = data.scalePresetId === "off" || isScalePresetId(data.scalePresetId) ? data.scalePresetId : "off";
     const scaleRoot = isPitchClass(data.scaleRoot) ? data.scaleRoot : "C";
     if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
@@ -1246,10 +1290,11 @@ function App() {
       const lineObj = line as Record<string, unknown>;
       if (!Array.isArray(lineObj.steps) || lineObj.steps.length !== STEPS) throw new Error(`Voice ${lineIndex + 1} must have ${STEPS} steps.`);
       if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Voice ${lineIndex + 1} params are invalid.`);
-      const fallbackLength = mapLegacyPatternLength(data.patternLength);
-      const patternLength = typeof lineObj.patternLength === "number" ? lineObj.patternLength : fallbackLength;
-      if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > maxPatternLengthForMode(patternTimingMode)) {
-        throw new Error(`Voice ${lineIndex + 1} patternLength must be between 4 and ${maxPatternLengthForMode(patternTimingMode)}.`);
+      const timingMode: PatternTimingMode =
+        lineObj.timingMode === "triplet" || lineObj.timingMode === "normal" ? lineObj.timingMode : "normal";
+      const patternLength = typeof lineObj.patternLength === "number" ? lineObj.patternLength : mapLegacyPatternLength(undefined);
+      if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > maxPatternLengthForMode(timingMode)) {
+        throw new Error(`Voice ${lineIndex + 1} patternLength must be between 4 and ${maxPatternLengthForMode(timingMode)}.`);
       }
       const paramsRaw = lineObj.params as Record<string, unknown>;
       if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`Voice ${lineIndex + 1} waveform is invalid.`);
@@ -1300,14 +1345,13 @@ function App() {
         };
       });
 
-      return { patternLength: clampPatternLength(patternLength, patternTimingMode), steps, params };
+      return { timingMode, patternLength: clampPatternLength(patternLength, timingMode), steps, params };
     });
 
     return {
       version: 1,
       programName: data.programName,
       lineCount: data.lineCount,
-      patternTimingMode,
       scalePresetId,
       scaleRoot,
       tempo: data.tempo,
@@ -1324,7 +1368,6 @@ function App() {
       const parsed = validateProjectData(JSON.parse(text));
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
-      setPatternTimingMode(parsed.patternTimingMode);
       setScalePresetId(parsed.scalePresetId ?? "off");
       setScaleRoot(parsed.scaleRoot ?? "C");
       setTempo(parsed.tempo);
@@ -1758,11 +1801,11 @@ function App() {
       const parsed = validateProjectData(raw);
       setIsPlaying(false);
       setPlayhead(-1);
-      stepRef.current = 0;
+      voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
+      voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
       setWorkspaceView("editor");
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
-      setPatternTimingMode(parsed.patternTimingMode);
       setScalePresetId(parsed.scalePresetId ?? "off");
       setScaleRoot(parsed.scaleRoot ?? "C");
       setTempo(parsed.tempo);
@@ -1824,7 +1867,7 @@ function App() {
       return;
     }
     if (action === "set-length") {
-      const maxLength = maxPatternLengthForMode(patternTimingMode);
+      const maxLength = maxPatternLengthForMode(selectedTimingMode);
       const value = window.prompt(`Length (4-${maxLength})`, String(patternLength));
       if (value === null) return;
       const parsed = Number(value);
@@ -1908,9 +1951,9 @@ function App() {
     const resetProject = { ...cloneProjectData(DEFAULT_PROJECT_TEMPLATE), programName };
     setIsPlaying(false);
     setPlayhead(-1);
-    stepRef.current = 0;
+    voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
     setLineCount(resetProject.lineCount);
-    setPatternTimingMode(resetProject.patternTimingMode);
     setScalePresetId(resetProject.scalePresetId ?? "off");
     setScaleRoot(resetProject.scaleRoot ?? "C");
     setTempo(resetProject.tempo);
@@ -1956,15 +1999,16 @@ function App() {
     };
   }, []);
 
+  const selectedTimingMode = lines[selectedLine].timingMode;
   const params = lines[selectedLine].params;
-  const patternLength = clampPatternLength(lines[selectedLine].patternLength, patternTimingMode);
+  const patternLength = clampPatternLength(lines[selectedLine].patternLength, selectedTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const shouldShowRotateOverlay = false;
   const controlsToggleLabel = "Controls";
   const projectToggleLabel = "Project";
   const modifiersToggleLabel = "Mods";
-  const patternTimingLabel = patternTimingMode === "normal" ? "♪" : "♪₃";
-  const patternTimingAriaLabel = patternTimingMode === "normal" ? "Regular note timing" : "Triplet note timing";
+  const patternTimingLabel = selectedTimingMode === "normal" ? "♪" : "♪₃";
+  const patternTimingAriaLabel = selectedTimingMode === "normal" ? "Regular note timing" : "Triplet note timing";
   const scaleEnabled = scalePresetId !== "off";
   const scalePitchClasses = scaleEnabled ? buildScalePitchClassSet(scaleRoot, scalePresetId) : null;
   const getPitchHighlightClass = (pitch: PitchName) => {
@@ -2111,7 +2155,7 @@ function App() {
             <div className="view-toggle header-timing-toggle" role="group" aria-label="Pattern timing">
               <button
                 type="button"
-                className={patternTimingMode === "triplet" ? "selected" : ""}
+                className={selectedTimingMode === "triplet" ? "selected" : ""}
                 aria-label={patternTimingAriaLabel}
                 title={patternTimingAriaLabel}
                 onClick={togglePatternTimingMode}
@@ -2387,7 +2431,7 @@ function App() {
             <div className="roll-header">
               <div className="pitch-col">Pitch</div>
               {Array.from({ length: patternLength }, (_, s) => (
-                <button key={s} className={`step-head ${playhead === s ? "playhead" : ""}`}>
+                <button key={s} className={`step-head ${playhead === s ? "playhead" : ""} ${isStepDisabledForTimingMode(s, selectedTimingMode) ? "disabled" : ""}`.trim()}>
                   {s + 1}
                 </button>
               ))}
@@ -2399,12 +2443,14 @@ function App() {
                   <div className={`pitch-col ${getPitchHighlightClass(pitch)}`}>{pitch}</div>
                   {Array.from({ length: patternLength }, (_, s) => {
                     const step = lines[selectedLine].steps[s];
+                    const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
                     const isNote = step.timeMode === "note" && step.pitch === pitch;
                     return (
                       <button
                         key={`${pitch}-${s}`}
-                        className={`cell ${isNote ? "note" : ""} ${getPitchHighlightClass(pitch)}`.trim()}
+                        className={`cell ${isNote ? "note" : ""} ${isDisabled ? "disabled" : ""} ${getPitchHighlightClass(pitch)}`.trim()}
                         onClick={() => placePitch(selectedLine, s, pitch)}
+                        disabled={isDisabled}
                       >
                         {isNote ? "■" : ""}
                       </button>
@@ -2422,9 +2468,10 @@ function App() {
                 <div className="lane-label">DOWN</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
+                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.transpose === "down";
                   return (
-                    <button key={`dn-${s}`} className={`lane-cell ${enabled ? "active" : ""}`} onClick={() => toggleTranspose(selectedLine, s, "down")} disabled={step.timeMode !== "note" || !step.pitch}>
+                    <button key={`dn-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleTranspose(selectedLine, s, "down")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
                       {enabled ? "ON" : "--"}
                     </button>
                   );
@@ -2434,9 +2481,10 @@ function App() {
                 <div className="lane-label">UP</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
+                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.transpose === "up";
                   return (
-                    <button key={`up-${s}`} className={`lane-cell ${enabled ? "active" : ""}`} onClick={() => toggleTranspose(selectedLine, s, "up")} disabled={step.timeMode !== "note" || !step.pitch}>
+                    <button key={`up-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleTranspose(selectedLine, s, "up")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
                       {enabled ? "ON" : "--"}
                     </button>
                   );
@@ -2446,9 +2494,10 @@ function App() {
                 <div className="lane-label">ACC</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
+                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.accent;
                   return (
-                    <button key={`acc-${s}`} className={`lane-cell ${enabled ? "active" : ""}`} onClick={() => toggleFlag(selectedLine, s, "accent")} disabled={step.timeMode !== "note" || !step.pitch}>
+                    <button key={`acc-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleFlag(selectedLine, s, "accent")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
                       {enabled ? "ON" : "--"}
                     </button>
                   );
@@ -2458,9 +2507,10 @@ function App() {
                 <div className="lane-label">SLIDE</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
+                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.slide;
                   return (
-                    <button key={`sl-${s}`} className={`lane-cell ${enabled ? "active" : ""}`} onClick={() => toggleFlag(selectedLine, s, "slide")} disabled={step.timeMode !== "note" || !step.pitch}>
+                    <button key={`sl-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleFlag(selectedLine, s, "slide")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
                       {enabled ? "ON" : "--"}
                     </button>
                   );
@@ -2470,15 +2520,16 @@ function App() {
                 <div className="lane-label">TIME</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
+                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
                   return (
-                    <div key={`time-${s}`} className="lane-time">
-                      <button className={step.timeMode === "note" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "note")}>
+                    <div key={`time-${s}`} className={`lane-time ${isDisabled ? "disabled" : ""}`.trim()}>
+                      <button className={step.timeMode === "note" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "note")} disabled={isDisabled}>
                         N
                       </button>
-                      <button className={step.timeMode === "tie" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "tie")}>
+                      <button className={step.timeMode === "tie" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "tie")} disabled={isDisabled}>
                         T
                       </button>
-                      <button className={step.timeMode === "rest" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "rest")}>
+                      <button className={step.timeMode === "rest" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "rest")} disabled={isDisabled}>
                         R
                       </button>
                     </div>

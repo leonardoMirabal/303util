@@ -550,6 +550,31 @@ button.selected {
   color: #0e1013;
 }
 
+.step-head.disabled,
+.cell.disabled,
+.lane-cell.disabled,
+.lane-time.disabled button {
+  background: #2a2f35;
+  color: #606872;
+  border-color: #353b43;
+}
+
+.step-head.disabled,
+.cell.disabled,
+.lane-cell.disabled {
+  cursor: not-allowed;
+}
+
+.cell.disabled,
+.lane-cell.disabled,
+.lane-time.disabled button {
+  opacity: 0.7;
+}
+
+.cell.disabled.note {
+  color: #8d98a5;
+}
+
 .roll-grid {
   display: grid;
   grid-template-rows: repeat(12, minmax(0, 1fr));
