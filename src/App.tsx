@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
+import packageJson from "../package.json";
 import "./App.css";
 
 const STEPS = 32;
@@ -8,6 +9,10 @@ const MAX_LINES = 3;
 const DEFAULT_PATTERN_LENGTH = 16;
 const MIN_PATTERN_LENGTH = 4;
 const APP_ICON_SRC = `${import.meta.env.BASE_URL}icon_knob.svg`;
+const APP_VERSION = packageJson.version;
+const RELEASES_URL = "https://github.com/leonardoMirabal/303util/releases";
+const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
+const LATEST_RELEASE_API_URL = "https://api.github.com/repos/leonardoMirabal/303util/releases/latest";
 const PATTERN_LENGTH_OPTIONS = Array.from({ length: STEPS - MIN_PATTERN_LENGTH + 1 }, (_, index) => index + MIN_PATTERN_LENGTH);
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
 const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
@@ -618,6 +623,27 @@ const maxPatternLengthForMode = (_mode: PatternTimingMode): number => STEPS;
 
 const clampPatternLength = (length: number, mode: PatternTimingMode): number =>
   Math.max(MIN_PATTERN_LENGTH, Math.min(maxPatternLengthForMode(mode), length));
+
+const normalizeVersionTag = (version: string): number[] =>
+  version
+    .trim()
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .map((part) => (Number.isFinite(part) ? part : 0));
+
+const compareVersionTags = (left: string, right: string): number => {
+  const leftParts = normalizeVersionTag(left);
+  const rightParts = normalizeVersionTag(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index] ?? 0;
+    const rightPart = rightParts[index] ?? 0;
+    if (leftPart === rightPart) continue;
+    return leftPart > rightPart ? 1 : -1;
+  }
+  return 0;
+};
 
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
 
@@ -1773,6 +1799,43 @@ function App() {
     }
   };
 
+  const openLatestReleasePage = () => {
+    window.open(LATEST_RELEASE_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const checkForAppUpdate = async () => {
+    try {
+      const response = await fetch(LATEST_RELEASE_API_URL, {
+        headers: {
+          Accept: "application/vnd.github+json",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`GitHub releases request failed (${response.status}).`);
+      }
+      const latestRelease = (await response.json()) as { tag_name?: string; html_url?: string };
+      const latestTag = latestRelease.tag_name?.trim();
+      const releaseUrl = latestRelease.html_url?.trim() || LATEST_RELEASE_URL;
+      if (!latestTag) {
+        openLatestReleasePage();
+        return;
+      }
+
+      if (compareVersionTags(latestTag, APP_VERSION) <= 0) {
+        window.alert(`You already have the latest version (${APP_VERSION}).`);
+        return;
+      }
+
+      const shouldOpen = window.confirm(`Update available: ${latestTag}\nCurrent version: ${APP_VERSION}\n\nOpen the latest release page to download the APK?`);
+      if (!shouldOpen) return;
+      window.open(releaseUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not check for updates.";
+      window.alert(`Could not check for updates: ${message}`);
+      openLatestReleasePage();
+    }
+  };
+
   const refreshLocalStorageData = async () => {
     const db = await openLocalDb();
     try {
@@ -2425,14 +2488,17 @@ function App() {
     }
 
     return (
-      <div className="mobile-group-panel" id="mobile-header-panel">
-        <div className="mobile-group-actions mobile-group-actions-grid">
-          <button type="button" onClick={() => void runStorageAction("set-voices")}>
-            Voice number {lineCount}
-          </button>
-          <button type="button" onClick={isFullscreen ? exitFullscreen : enterFullscreen}>
-            {isFullscreen ? "Exit Full" : "Full"}
-          </button>
+        <div className="mobile-group-panel" id="mobile-header-panel">
+          <div className="mobile-group-actions mobile-group-actions-grid">
+            <button type="button" onClick={() => void runStorageAction("set-voices")}>
+              Voice number {lineCount}
+            </button>
+            <button type="button" onClick={() => void checkForAppUpdate()}>
+              Update
+            </button>
+            <button type="button" onClick={isFullscreen ? exitFullscreen : enterFullscreen}>
+              {isFullscreen ? "Exit Full" : "Full"}
+            </button>
           <button type="button" onClick={() => void runStorageAction("import-json")}>
             Import
           </button>
