@@ -84,6 +84,79 @@ body {
   color: #f7fafc;
 }
 
+.mobile-project-modal {
+  width: min(560px, 100%);
+  max-height: min(78dvh, 460px);
+}
+
+.mobile-header-groups {
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.mobile-header-groups button {
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.mobile-group-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #5b6672;
+  border-radius: 8px;
+  background: #434a53;
+}
+
+.mobile-group-panel-dual {
+  grid-template-columns: minmax(90px, 120px) minmax(0, 1fr);
+  align-items: end;
+}
+
+.mobile-group-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #eef2f6;
+}
+
+.mobile-group-field-compact {
+  max-width: 180px;
+}
+
+.mobile-group-field input,
+.mobile-group-field select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+}
+
+.mobile-group-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-group-actions-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mobile-group-actions button {
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 0.76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .library-picker-list {
   display: grid;
   gap: 6px;

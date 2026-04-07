@@ -3,10 +3,12 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import "./App.css";
 
-const STEPS = 16;
+const STEPS = 32;
 const MAX_LINES = 3;
 const DEFAULT_PATTERN_LENGTH = 16;
+const MIN_PATTERN_LENGTH = 4;
 const APP_ICON_SRC = `${import.meta.env.BASE_URL}icon_knob.svg`;
+const PATTERN_LENGTH_OPTIONS = Array.from({ length: STEPS - MIN_PATTERN_LENGTH + 1 }, (_, index) => index + MIN_PATTERN_LENGTH);
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
 const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const DELAY_SUBDIVISIONS = [
@@ -281,7 +283,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
         { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "down" },
         { pitch: "D#3", timeMode: "note", accent: false, slide: true, transpose: "none" },
         { pitch: "C3", timeMode: "note", accent: false, slide: false, transpose: "none" },
-        ...Array.from({ length: 8 }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
+        ...Array.from({ length: STEPS - 8 }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
       ],
       params: {
         waveform: "sawtooth",
@@ -600,19 +602,22 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
 
 const mapLegacyPatternLength = (raw: unknown): number => {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_PATTERN_LENGTH;
-  return Math.max(4, Math.min(16, raw));
+  return Math.max(MIN_PATTERN_LENGTH, Math.min(STEPS, raw));
 };
 
-const isTripletDisabledStep = (stepIndex: number): boolean => (stepIndex + 1) % 4 === 0;
+const playablePatternLengthForMode = (patternLength: number, mode: PatternTimingMode): number =>
+  mode === "triplet" ? Math.max(1, patternLength - Math.floor(patternLength / 4)) : patternLength;
 
-const isStepDisabledForTimingMode = (stepIndex: number, mode: PatternTimingMode): boolean => mode === "triplet" && isTripletDisabledStep(stepIndex);
+const isStepDisabledForTimingMode = (stepIndex: number, patternLength: number, mode: PatternTimingMode): boolean =>
+  stepIndex >= playablePatternLengthForMode(patternLength, mode);
 
 const playableStepIndicesForLength = (patternLength: number, mode: PatternTimingMode): number[] =>
-  Array.from({ length: patternLength }, (_, stepIndex) => stepIndex).filter((stepIndex) => !isStepDisabledForTimingMode(stepIndex, mode));
+  Array.from({ length: playablePatternLengthForMode(patternLength, mode) }, (_, stepIndex) => stepIndex);
 
-const maxPatternLengthForMode = (_mode: PatternTimingMode): number => 16;
+const maxPatternLengthForMode = (_mode: PatternTimingMode): number => STEPS;
 
-const clampPatternLength = (length: number, mode: PatternTimingMode): number => Math.max(4, Math.min(maxPatternLengthForMode(mode), length));
+const clampPatternLength = (length: number, mode: PatternTimingMode): number =>
+  Math.max(MIN_PATTERN_LENGTH, Math.min(maxPatternLengthForMode(mode), length));
 
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
 
@@ -861,7 +866,9 @@ function App() {
   };
 
   const placePitch = (lineIndex: number, stepIndex: number, pitch: PitchName) => {
-    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
+    const line = lines[lineIndex];
+    if (!line) return;
+    if (isStepDisabledForTimingMode(stepIndex, clampPatternLength(line.patternLength, line.timingMode), line.timingMode)) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -882,7 +889,9 @@ function App() {
   };
 
   const setStepMode = (lineIndex: number, stepIndex: number, mode: TimeMode) => {
-    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
+    const line = lines[lineIndex];
+    if (!line) return;
+    if (isStepDisabledForTimingMode(stepIndex, clampPatternLength(line.patternLength, line.timingMode), line.timingMode)) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -902,7 +911,9 @@ function App() {
   };
 
   const toggleFlag = (lineIndex: number, stepIndex: number, flag: "accent" | "slide") => {
-    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
+    const line = lines[lineIndex];
+    if (!line) return;
+    if (isStepDisabledForTimingMode(stepIndex, clampPatternLength(line.patternLength, line.timingMode), line.timingMode)) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -919,7 +930,9 @@ function App() {
   };
 
   const toggleTranspose = (lineIndex: number, stepIndex: number, mode: Transpose) => {
-    if (isStepDisabledForTimingMode(stepIndex, lines[lineIndex]?.timingMode ?? "normal")) return;
+    const line = lines[lineIndex];
+    if (!line) return;
+    if (isStepDisabledForTimingMode(stepIndex, clampPatternLength(line.patternLength, line.timingMode), line.timingMode)) return;
     setLines((prev) =>
       prev.map((line, li) =>
         li === lineIndex
@@ -1008,7 +1021,7 @@ function App() {
 
     let noteSteps = 1;
     for (let s = stepIndex + 1; s < line.patternLength; s += 1) {
-      if (isStepDisabledForTimingMode(s, line.timingMode)) break;
+      if (isStepDisabledForTimingMode(s, line.patternLength, line.timingMode)) break;
       if (line.steps[s].timeMode === "tie") noteSteps += 1;
       else break;
     }
@@ -1026,7 +1039,7 @@ function App() {
 
     if (step.slide) {
       let prevIdx = (stepIndex - 1 + line.patternLength) % line.patternLength;
-      while (prevIdx !== stepIndex && isStepDisabledForTimingMode(prevIdx, line.timingMode)) {
+      while (prevIdx !== stepIndex && isStepDisabledForTimingMode(prevIdx, line.patternLength, line.timingMode)) {
         prevIdx = (prevIdx - 1 + line.patternLength) % line.patternLength;
       }
       const prevBase = findBaseStep(line.steps, prevIdx);
@@ -1314,7 +1327,7 @@ function App() {
         for (let i = 0; i < voiceLength; i += 1) {
           const x = left + labelWidth + i * colWidth;
           ctx.strokeRect(x, y, colWidth, rowHeight);
-          if (isStepDisabledForTimingMode(i, voice.timingMode)) {
+          if (isStepDisabledForTimingMode(i, voiceLength, voice.timingMode)) {
             ctx.save();
             ctx.fillStyle = "#d8dce1";
             ctx.fillRect(x + 1, y + 1, colWidth - 2, rowHeight - 2);
@@ -1402,7 +1415,9 @@ function App() {
     const normalizedLines = sourceLines.map((line, lineIndex): LineState => {
       if (!line || typeof line !== "object") throw new Error(`Voice ${lineIndex + 1} is invalid.`);
       const lineObj = line as Record<string, unknown>;
-      if (!Array.isArray(lineObj.steps) || lineObj.steps.length !== STEPS) throw new Error(`Voice ${lineIndex + 1} must have ${STEPS} steps.`);
+      if (!Array.isArray(lineObj.steps) || lineObj.steps.length > STEPS || lineObj.steps.length < DEFAULT_PATTERN_LENGTH) {
+        throw new Error(`Voice ${lineIndex + 1} must have between ${DEFAULT_PATTERN_LENGTH} and ${STEPS} steps.`);
+      }
       if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Voice ${lineIndex + 1} params are invalid.`);
       const timingMode: PatternTimingMode =
         lineObj.timingMode === "triplet" || lineObj.timingMode === "normal" ? lineObj.timingMode : "normal";
@@ -1434,7 +1449,7 @@ function App() {
         throw new Error(`Voice ${lineIndex + 1} params contain invalid numbers.`);
       }
 
-      const steps: Step[] = lineObj.steps.map((stepRaw, stepIndex) => {
+      const parsedSteps: Step[] = lineObj.steps.map((stepRaw, stepIndex) => {
         if (!stepRaw || typeof stepRaw !== "object") throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} is invalid.`);
         const step = stepRaw as Record<string, unknown>;
         if (step.timeMode !== "note" && step.timeMode !== "tie" && step.timeMode !== "rest") {
@@ -1458,6 +1473,19 @@ function App() {
           transpose: step.transpose,
         };
       });
+      const steps: Step[] =
+        parsedSteps.length === STEPS
+          ? parsedSteps
+          : [
+              ...parsedSteps,
+              ...Array.from({ length: STEPS - parsedSteps.length }, (): Step => ({
+                pitch: null,
+                timeMode: "rest",
+                accent: false,
+                slide: false,
+                transpose: "none",
+              })),
+            ];
 
       return { timingMode, patternLength: clampPatternLength(patternLength, timingMode), steps, params };
     });
@@ -2337,12 +2365,21 @@ function App() {
             Name
             <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
           </label>
+          <label className="mobile-group-field mobile-group-field-compact">
+            Pattern length
+            <select value={patternLength} onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}>
+              {PATTERN_LENGTH_OPTIONS.map((length) => {
+                return (
+                  <option key={length} value={length}>
+                    {length}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
           <div className="mobile-group-actions">
             <button type="button" onClick={resetPattern}>
               Init
-            </button>
-            <button type="button" onClick={() => void runStorageAction("set-length")}>
-              Len {patternLength}
             </button>
             <button type="button" onClick={() => openNewPatternModal(selectedLibraryId)}>
               New
@@ -2359,6 +2396,16 @@ function App() {
       return (
         <div className="mobile-group-panel mobile-group-panel-dual" id="mobile-header-panel">
           <label className="mobile-group-field">
+            Root
+            <select value={scaleRoot} onChange={(e) => setScaleRoot(e.currentTarget.value as PitchClass)} disabled={!scaleEnabled}>
+              {PITCH_CLASSES.map((pitchClass) => (
+                <option key={pitchClass} value={pitchClass}>
+                  {pitchClass}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="mobile-group-field">
             Scale
             <select value={scalePresetId} onChange={(e) => setScalePresetId(e.currentTarget.value)}>
               <option value="off">Off</option>
@@ -2370,16 +2417,6 @@ function App() {
                     </option>
                   ))}
                 </optgroup>
-              ))}
-            </select>
-          </label>
-          <label className="mobile-group-field">
-            Root
-            <select value={scaleRoot} onChange={(e) => setScaleRoot(e.currentTarget.value as PitchClass)} disabled={!scaleEnabled}>
-              {PITCH_CLASSES.map((pitchClass) => (
-                <option key={pitchClass} value={pitchClass}>
-                  {pitchClass}
-                </option>
               ))}
             </select>
           </label>
@@ -2668,8 +2705,7 @@ function App() {
                     value={patternLength}
                     onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
                   >
-                    {Array.from({ length: 13 }, (_, index) => {
-                      const length = index + 4;
+                    {PATTERN_LENGTH_OPTIONS.map((length) => {
                       return (
                         <option key={length} value={length}>
                           {length}
@@ -2749,8 +2785,7 @@ function App() {
                   value={patternLength}
                   onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
                 >
-                  {Array.from({ length: 13 }, (_, index) => {
-                    const length = index + 4;
+                  {PATTERN_LENGTH_OPTIONS.map((length) => {
                     return (
                       <option key={length} value={length}>
                         {length}
@@ -2946,10 +2981,13 @@ function App() {
             <div className="roll-header">
               <div className="pitch-col">Pitch</div>
               {Array.from({ length: patternLength }, (_, s) => (
-                <button key={s} className={`step-head ${playhead === s ? "playhead" : ""} ${isStepDisabledForTimingMode(s, selectedTimingMode) ? "disabled" : ""}`.trim()}>
-                  {s + 1}
-                </button>
-              ))}
+              <button
+                key={s}
+                className={`step-head ${playhead === s ? "playhead" : ""} ${isStepDisabledForTimingMode(s, patternLength, selectedTimingMode) ? "disabled" : ""}`.trim()}
+              >
+                {s + 1}
+              </button>
+            ))}
             </div>
 
             <div className="roll-grid">
@@ -2958,7 +2996,7 @@ function App() {
                   <div className={`pitch-col ${getPitchHighlightClass(pitch)}`}>{pitch}</div>
                   {Array.from({ length: patternLength }, (_, s) => {
                     const step = lines[selectedLine].steps[s];
-                    const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
+                    const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                     const isNote = step.timeMode === "note" && step.pitch === pitch;
                     return (
                       <button
@@ -2983,7 +3021,7 @@ function App() {
                 <div className="lane-label">DOWN</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
+                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.transpose === "down";
                   return (
                     <button key={`dn-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleTranspose(selectedLine, s, "down")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
@@ -2996,7 +3034,7 @@ function App() {
                 <div className="lane-label">UP</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
+                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.transpose === "up";
                   return (
                     <button key={`up-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleTranspose(selectedLine, s, "up")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
@@ -3009,7 +3047,7 @@ function App() {
                 <div className="lane-label">ACC</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
+                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.accent;
                   return (
                     <button key={`acc-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleFlag(selectedLine, s, "accent")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
@@ -3022,7 +3060,7 @@ function App() {
                 <div className="lane-label">SLIDE</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
+                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   const enabled = step.timeMode === "note" && step.pitch && step.slide;
                   return (
                     <button key={`sl-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleFlag(selectedLine, s, "slide")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
@@ -3035,7 +3073,7 @@ function App() {
                 <div className="lane-label">TIME</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, selectedTimingMode);
+                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   return (
                     <div key={`time-${s}`} className={`lane-time ${isDisabled ? "disabled" : ""}`.trim()}>
                       <button className={step.timeMode === "note" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "note")} disabled={isDisabled}>
