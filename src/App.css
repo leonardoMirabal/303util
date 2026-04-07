@@ -664,6 +664,21 @@ button.selected {
   grid-template-columns: repeat(7, 64px);
 }
 
+.stack-control {
+  display: grid;
+  grid-template-rows: 12px minmax(0, 34px);
+  justify-items: center;
+  align-items: start;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stack-control .knob-label {
+  align-self: end;
+}
+
 .volume-knob-slot,
 .wave-knob-slot {
   display: flex;
@@ -686,6 +701,41 @@ button.selected {
 
 .tempo-button-stack {
   display: none;
+}
+
+.pattern-transpose-stack {
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  align-self: stretch;
+  justify-items: stretch;
+  width: 36px;
+  min-height: 34px;
+}
+
+.pattern-transpose-stack .tempo-action-button {
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  padding: 0 4px;
+}
+
+.delay-sync-slot .delay-sync-control {
+  width: 100%;
+  max-width: 58px;
+  min-width: 0;
+}
+
+.pattern-transpose-control {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.pattern-transpose-control .pattern-transpose-stack {
+  min-height: 46px;
 }
 
 .tempo-action-button {
@@ -1668,6 +1718,7 @@ button.selected {
 
   .fx-knobs {
     grid-template-columns: repeat(7, 48px);
+    padding-inline-end: 4px;
   }
 
   .wave-toggle button {
@@ -1712,6 +1763,29 @@ button.selected {
     height: 15px;
     padding: 0 2px;
     font-size: 0.48rem;
+    line-height: 1;
+  }
+
+  .stack-control {
+    grid-template-rows: 12px minmax(0, 32px);
+  }
+
+  .pattern-transpose-control {
+    grid-column: 7;
+    justify-self: stretch;
+  }
+
+  .pattern-transpose-stack {
+    width: 38px;
+    min-height: 36px;
+    gap: 1px;
+  }
+
+  .pattern-transpose-stack .tempo-action-button {
+    min-width: 0;
+    height: auto;
+    padding: 0 2px;
+    font-size: 0.54rem;
     line-height: 1;
   }
 

@@ -367,19 +367,24 @@ const blankProjectState = () => ({
 });
 
 const DEFAULT_PROJECT_STATE = resetProjectState();
+const BASE_PITCH_MIN_MIDI = 48; // C3
+const BASE_PITCH_MAX_MIDI = 59; // B3
+const TRANSPOSED_PITCH_MIN_MIDI = BASE_PITCH_MIN_MIDI - 12; // C2
+const TRANSPOSED_PITCH_MAX_MIDI = BASE_PITCH_MAX_MIDI + 12; // B4
 
-const noteToFrequency = (note: PitchName): number => {
+const noteToMidi = (note: PitchName): number => {
   const match = note.match(/^([A-G])(#|b)?(\d)$/);
-  if (!match) return 220;
+  if (!match) return 57;
   const [, letter, accidental, octaveText] = match;
   const semitoneByLetter: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
   let semitone = semitoneByLetter[letter];
   if (accidental === "#") semitone += 1;
   if (accidental === "b") semitone -= 1;
   const octave = Number(octaveText);
-  const midi = (octave + 1) * 12 + semitone;
-  return 440 * 2 ** ((midi - 69) / 12);
+  return (octave + 1) * 12 + semitone;
 };
+
+const noteToFrequency = (note: PitchName): number => 440 * 2 ** ((noteToMidi(note) - 69) / 12);
 
 const transposeNote = (freq: number, mode: Transpose) => {
   if (mode === "down") return freq / 2;
@@ -418,6 +423,26 @@ const isScalePresetId = (value: unknown): value is string => typeof value === "s
 
 const shortNote = (pitch: PitchName | null): string => (pitch ? pitch : "-");
 const toPitchClass = (pitch: PitchName): PitchClass => pitch.replace(/\d/g, "") as PitchClass;
+const midiToPitchName = (midi: number): PitchName | null => {
+  const pitchClass = PITCH_CLASSES[((midi % 12) + 12) % 12];
+  const octave = Math.floor(midi / 12) - 1;
+  const pitch = `${pitchClass}${octave}`;
+  return isPitchName(pitch) ? pitch : null;
+};
+const transposeOffsetForStep = (transpose: Transpose): number => (transpose === "down" ? -12 : transpose === "up" ? 12 : 0);
+const pitchAndTransposeFromMidi = (midi: number): { pitch: PitchName; transpose: Transpose } | null => {
+  if (midi < TRANSPOSED_PITCH_MIN_MIDI || midi > TRANSPOSED_PITCH_MAX_MIDI) return null;
+  if (midi < BASE_PITCH_MIN_MIDI) {
+    const pitch = midiToPitchName(midi + 12);
+    return pitch ? { pitch, transpose: "down" } : null;
+  }
+  if (midi > BASE_PITCH_MAX_MIDI) {
+    const pitch = midiToPitchName(midi - 12);
+    return pitch ? { pitch, transpose: "up" } : null;
+  }
+  const pitch = midiToPitchName(midi);
+  return pitch ? { pitch, transpose: "none" } : null;
+};
 const buildScalePitchClassSet = (root: PitchClass, presetId: string): Set<PitchClass> => {
   const preset = SCALE_PRESETS.find((entry) => entry.id === presetId);
   if (!preset) return new Set();
@@ -751,6 +776,7 @@ function App() {
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
   const restoredPatternRef = useRef(false);
+  const transposeOriginRef = useRef<{ lines: LineState[]; scaleRoot: PitchClass } | null>(null);
   const googleSyncEnabledRef = useRef(false);
   const hasLoadedLocalDataRef = useRef(false);
   const isApplyingDriveBackupRef = useRef(false);
@@ -989,6 +1015,47 @@ function App() {
     setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
   };
 
+  const transposeCurrentPattern = (semitoneDelta: number) => {
+    if (!transposeOriginRef.current) {
+      transposeOriginRef.current = {
+        lines: cloneProjectData({ ...buildProjectSnapshot(), lines }).lines,
+        scaleRoot,
+      };
+    }
+
+    const transposedLines = lines.map((line) => ({
+      ...line,
+      steps: line.steps.map((step) => {
+        if (!step.pitch) return step;
+        const effectiveMidi = noteToMidi(step.pitch) + transposeOffsetForStep(step.transpose) + semitoneDelta;
+        const nextStep = pitchAndTransposeFromMidi(effectiveMidi);
+        if (!nextStep) return null;
+        return { ...step, pitch: nextStep.pitch, transpose: nextStep.transpose };
+      }),
+    }));
+
+    if (transposedLines.some((line) => line.steps.some((step) => step === null))) {
+      window.alert(`Pattern cannot be transposed ${semitoneDelta > 0 ? "up" : "down"} any further.`);
+      return;
+    }
+
+    setLines(
+      transposedLines.map((line) => ({
+        ...line,
+        steps: line.steps as Step[],
+      })),
+    );
+    setScaleRoot((prev) => PITCH_CLASSES[(PITCH_CLASS_INDEX[prev] + semitoneDelta + PITCH_CLASSES.length) % PITCH_CLASSES.length]);
+  };
+
+  const rollbackTransposedPattern = () => {
+    const origin = transposeOriginRef.current;
+    if (!origin) return;
+    setLines(origin.lines.map((line) => ({ ...line, steps: line.steps.map((step) => ({ ...step })), params: { ...line.params } })));
+    setScaleRoot(origin.scaleRoot);
+    transposeOriginRef.current = null;
+  };
+
   const setProjectTempo = (value: number) => {
     setHalfTempoBase(null);
     setTempo(clampTempo(value));
@@ -1156,6 +1223,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(LAST_PATTERN_ID_KEY, selectedPatternId);
   }, [selectedPatternId]);
+
+  useEffect(() => {
+    transposeOriginRef.current = null;
+  }, [selectedLibraryId, selectedPatternId]);
   useEffect(() => {
     if (restoredPatternRef.current || patterns.length === 0) return;
     const lastLibraryId = window.localStorage.getItem(LAST_LIBRARY_ID_KEY);
@@ -2799,7 +2870,7 @@ function App() {
                   {modifiersToggleLabel}
                 </button>
                 <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
-                  +
+                  New
                 </button>
                 <button type="button" className="mobile-menu-button" onClick={initCurrentPattern} aria-label="Init pattern" title="Init pattern">
                   Init
@@ -2861,7 +2932,7 @@ function App() {
                 </select>
               </div>
               <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
-                +
+                New
               </button>
               <button type="button" className="mobile-menu-button" onClick={initCurrentPattern} aria-label="Init pattern" title="Init pattern">
                 Init
@@ -2929,26 +3000,29 @@ function App() {
                   <div className="delay-divider" />
 
                   <div className="knob-grid fx-knobs">
-                    <div className="delay-sync-control">
-                      <button
-                        className={params.delaySync ? "selected" : ""}
-                        aria-label={params.delaySync ? "Switch delay to free time" : "Switch delay to synced time"}
-                        onClick={() => updateParams({ delaySync: !params.delaySync })}
-                      >
-                        {params.delaySync ? "S" : "F"}
-                      </button>
-                      <select
-                        aria-label="Delay subdivision"
-                        value={params.delaySubdivision}
-                        disabled={!params.delaySync}
-                        onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                      >
-                        {DELAY_SUBDIVISIONS.map((subdivision) => (
-                          <option key={subdivision.value} value={subdivision.value}>
-                            {subdivision.label}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="stack-control delay-sync-slot">
+                      <div className="knob-label">Sync</div>
+                      <div className="delay-sync-control">
+                        <button
+                          className={params.delaySync ? "selected" : ""}
+                          aria-label={params.delaySync ? "Switch delay to free time" : "Switch delay to synced time"}
+                          onClick={() => updateParams({ delaySync: !params.delaySync })}
+                        >
+                          {params.delaySync ? "S" : "F"}
+                        </button>
+                        <select
+                          aria-label="Delay subdivision"
+                          value={params.delaySubdivision}
+                          disabled={!params.delaySync}
+                          onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                        >
+                          {DELAY_SUBDIVISIONS.map((subdivision) => (
+                            <option key={subdivision.value} value={subdivision.value}>
+                              {subdivision.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                     <KnobControl
                       label={synthLabels.delayTime}
@@ -2964,6 +3038,26 @@ function App() {
                     <KnobControl label={synthLabels.delayMix} min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label={synthLabels.distortion} min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label={synthLabels.reverb} min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                    <div className="stack-control pattern-transpose-control" aria-label="Pattern transpose controls">
+                      <div className="pattern-transpose-stack">
+                        <button type="button" className="tempo-action-button" aria-label="Transpose pattern up" title="Transpose pattern up" onClick={() => transposeCurrentPattern(1)}>
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          className="tempo-action-button"
+                          aria-label="Restore original pattern"
+                          title="Restore original pattern"
+                          onClick={rollbackTransposedPattern}
+                          disabled={!transposeOriginRef.current}
+                        >
+                          0
+                        </button>
+                        <button type="button" className="tempo-action-button" aria-label="Transpose pattern down" title="Transpose pattern down" onClick={() => transposeCurrentPattern(-1)}>
+                          -
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -2996,24 +3090,27 @@ function App() {
                   <div className="delay-divider" />
 
                   <div className="knob-grid fx-knobs">
-                    <div className="delay-sync-control">
-                      <button
-                        className={params.delaySync ? "selected" : ""}
-                        onClick={() => updateParams({ delaySync: !params.delaySync })}
-                      >
-                        {params.delaySync ? "SYNC" : "FREE"}
-                      </button>
-                      <select
-                        value={params.delaySubdivision}
-                        disabled={!params.delaySync}
-                        onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                      >
-                        {DELAY_SUBDIVISIONS.map((subdivision) => (
-                          <option key={subdivision.value} value={subdivision.value}>
-                            {subdivision.label}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="stack-control delay-sync-slot">
+                      <div className="knob-label">Sync</div>
+                      <div className="delay-sync-control">
+                        <button
+                          className={params.delaySync ? "selected" : ""}
+                          onClick={() => updateParams({ delaySync: !params.delaySync })}
+                        >
+                          {params.delaySync ? "SYNC" : "FREE"}
+                        </button>
+                        <select
+                          value={params.delaySubdivision}
+                          disabled={!params.delaySync}
+                          onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                        >
+                          {DELAY_SUBDIVISIONS.map((subdivision) => (
+                            <option key={subdivision.value} value={subdivision.value}>
+                              {subdivision.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                     <KnobControl
                       label="Delay Time"
@@ -3029,6 +3126,26 @@ function App() {
                     <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                    <div className="stack-control pattern-transpose-control" aria-label="Pattern transpose controls">
+                      <div className="pattern-transpose-stack">
+                        <button type="button" className="tempo-action-button" aria-label="Transpose pattern up" title="Transpose pattern up" onClick={() => transposeCurrentPattern(1)}>
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          className="tempo-action-button"
+                          aria-label="Restore original pattern"
+                          title="Restore original pattern"
+                          onClick={rollbackTransposedPattern}
+                          disabled={!transposeOriginRef.current}
+                        >
+                          0
+                        </button>
+                        <button type="button" className="tempo-action-button" aria-label="Transpose pattern down" title="Transpose pattern down" onClick={() => transposeCurrentPattern(-1)}>
+                          -
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </>
               )}
