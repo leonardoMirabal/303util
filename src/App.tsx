@@ -2658,22 +2658,24 @@ function App() {
                 <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                   {isPlaying ? "Stop" : "Play"}
                 </button>
-                <select
-                  className="mobile-length-select"
-                  aria-label="Pattern length"
-                  title="Pattern length"
-                  value={patternLength}
-                  onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
-                >
-                  {Array.from({ length: 13 }, (_, index) => {
-                    const length = index + 4;
-                    return (
-                      <option key={length} value={length}>
-                        {length}
-                      </option>
-                    );
-                  })}
-                </select>
+                <div className="header-length-select">
+                  <select
+                    className="mobile-length-select"
+                    aria-label="Pattern length"
+                    title="Pattern length"
+                    value={patternLength}
+                    onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
+                  >
+                    {Array.from({ length: 13 }, (_, index) => {
+                      const length = index + 4;
+                      return (
+                        <option key={length} value={length}>
+                          {length}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
                 <button
                   type="button"
                   className={`mobile-controls-toggle ${mobileControlsOpen ? "selected" : ""}`}
@@ -2718,22 +2720,43 @@ function App() {
               <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                 {isPlaying ? "Stop" : "Play"}
               </button>
-              <select
-                className="mobile-length-select"
-                aria-label="Pattern length"
-                title="Pattern length"
-                value={patternLength}
-                onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
+              <button
+                type="button"
+                className={`tempo-action-button desktop-header-tempo-button${selectedTimingMode === "triplet" ? " is-active" : ""}`}
+                aria-label={patternTimingAriaLabel}
+                title={patternTimingAriaLabel}
+                onClick={togglePatternTimingMode}
               >
-                {Array.from({ length: 13 }, (_, index) => {
-                  const length = index + 4;
-                  return (
-                    <option key={length} value={length}>
-                      {length}
-                    </option>
-                  );
-                })}
-              </select>
+                {patternTimingLabel}
+              </button>
+              <button
+                type="button"
+                className={`tempo-action-button desktop-header-tempo-button${halfTempoBase === null ? "" : " is-active"}`}
+                onClick={toggleHalfTempo}
+                aria-label="Toggle half tempo"
+                aria-pressed={halfTempoBase !== null}
+                title="Half speed"
+              >
+                1/2
+              </button>
+              <div className="header-length-select">
+                <select
+                  className="mobile-length-select"
+                  aria-label="Pattern length"
+                  title="Pattern length"
+                  value={patternLength}
+                  onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
+                >
+                  {Array.from({ length: 13 }, (_, index) => {
+                    const length = index + 4;
+                    return (
+                      <option key={length} value={length}>
+                        {length}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
               <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
                 +
               </button>
@@ -2847,15 +2870,6 @@ function App() {
                       <div className="bpm-knob-slot desktop-bpm-knob-slot">
                         <KnobControl label="BPM" min={MIN_TEMPO} max={MAX_TEMPO} value={tempo} onChange={setTempoFromKnob} />
                       </div>
-                      <button
-                        type="button"
-                        className={`tempo-action-button${halfTempoBase === null ? "" : " is-active"}`}
-                        onClick={toggleHalfTempo}
-                        aria-label="Toggle half tempo"
-                        aria-pressed={halfTempoBase !== null}
-                      >
-                        1/2
-                      </button>
                     </div>
                     <div className="volume-knob-slot desktop-volume-knob-slot">
                       <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
