@@ -2,6 +2,8 @@
 
 **303 util** is a compact TB-303 pattern editor, playback tool, and printable pattern-sheet generator. This manual is written for end users and covers the full app workflow: creating libraries, building patterns, working with 1-3 voices, using scale mode, exporting sheets, saving and opening project files, and backing up your saved work to Google Drive.
 
+The original sound engine code is based on [thedjinn/js303](https://github.com/thedjinn/js303).
+
 ![303 util main screen](docs/screenshots/overview-main.png)
 
 ## Quick start
