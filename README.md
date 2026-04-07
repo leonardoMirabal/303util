@@ -9,12 +9,13 @@ The original sound engine code is based on [thedjinn/js303](https://github.com/t
 ## Quick start
 
 1. Open the app and click the pattern name strip to choose a library and pattern, or click **+** to start a new one.
-2. In **Editor**, click notes into the pitch grid.
-3. Set each step in the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
-4. Add **DOWN**, **UP**, **ACC**, and **SLIDE** where needed.
-5. Press **Play** to hear the pattern.
-6. Click **Save** to store it in the current library.
-7. Switch to **Sheet**, click **Refresh**, then **Save PNG** to export the chart.
+2. Set the pattern length with the length selector in the top bar.
+3. In **Editor**, click notes into the pitch grid.
+4. Set each step in the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
+5. Add **DOWN**, **UP**, **ACC**, and **SLIDE** where needed.
+6. Press **Play** to hear the pattern.
+7. Click **Save** to store it in the current library.
+8. Switch to **Sheet**, click **Refresh**, then **Save PNG** to export the chart.
 
 ## Interface overview
 
@@ -24,6 +25,7 @@ The main screen is built around a few controls you will use constantly:
 | --- | --- |
 | **TB-303 util button** | Opens the main menu and project options |
 | **Pattern name strip** | Shows the current `library > pattern` and opens the library/pattern picker |
+| **Length selector** | Sets the active voice length directly from the top bar |
 | **Play / + / Save** | Playback, new pattern, and save actions |
 | **Controls / Mods** | On compact layouts, show or hide the sound controls and step modifier lanes |
 | **Voice buttons** | Choose voice `1`, `2`, or `3` for editing |
@@ -48,6 +50,8 @@ Important behavior:
 ### Open a library or pattern
 
 Click the name strip at the top of the app. On some layouts, the same actions are also available from the main menu.
+
+![Libraries and patterns picker](docs/screenshots/library-pattern-picker.png)
 
 ### Create a new pattern
 
@@ -119,6 +123,15 @@ Playback runs all active voices together, but you edit one voice at a time.
 
 ![Compact toolbar with voice and workspace buttons](docs/screenshots/mobile-toolbar-compact.png)
 
+### Change the pattern length
+
+You can change the active voice length in two places:
+
+- use the **length selector** in the top bar for quick changes
+- use **Len** inside the menu on compact layouts
+
+Length is stored per voice, so voice 1, 2, and 3 can use different step counts.
+
 ## Sound controls
 
 The control strip always edits the **currently selected voice**.
@@ -148,12 +161,12 @@ The control strip always edits the **currently selected voice**.
 
 On phones and small screens, use **Controls** to show or hide the knob section and **Mods** to show or hide the sequencing lanes.
 
-## Scales, length, and project settings
+## Scales and project settings
 
 Use the menu to reach the project options:
 
 - **Scale** and **Root** highlighting for guided note placement
-- **Length** for the active voice
+- **Len** for the active voice
 - **Voices** to switch between 1, 2, or 3 voice projects
 - **Import** and **Export JSON**
 - **Export PNG**

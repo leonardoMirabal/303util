@@ -5,6 +5,7 @@ import "./App.css";
 
 const STEPS = 16;
 const MAX_LINES = 3;
+const DEFAULT_PATTERN_LENGTH = 16;
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
 const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const DELAY_SUBDIVISIONS = [
@@ -247,7 +248,7 @@ const defaultParams = (): VoiceParams => ({
 
 const makeLine = (): LineState => ({
   timingMode: "normal",
-  patternLength: 8,
+  patternLength: DEFAULT_PATTERN_LENGTH,
   steps: Array.from({ length: STEPS }, () => ({
     pitch: null,
     timeMode: "rest",
@@ -269,7 +270,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   lines: [
     {
       timingMode: "normal",
-      patternLength: 8,
+      patternLength: DEFAULT_PATTERN_LENGTH,
       steps: [
         { pitch: "C3", timeMode: "note", accent: true, slide: false, transpose: "down" },
         { pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" },
@@ -301,7 +302,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
     },
     {
       timingMode: "normal",
-      patternLength: 8,
+      patternLength: DEFAULT_PATTERN_LENGTH,
       steps: Array.from({ length: STEPS }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
       params: {
         waveform: "sawtooth",
@@ -323,7 +324,7 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
     },
     {
       timingMode: "normal",
-      patternLength: 8,
+      patternLength: DEFAULT_PATTERN_LENGTH,
       steps: Array.from({ length: STEPS }, (): Step => ({ pitch: null, timeMode: "rest", accent: false, slide: false, transpose: "none" })),
       params: defaultParams(),
     },
@@ -595,7 +596,7 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
 };
 
 const mapLegacyPatternLength = (raw: unknown): number => {
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return 8;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_PATTERN_LENGTH;
   return Math.max(4, Math.min(16, raw));
 };
 
@@ -2142,17 +2143,27 @@ function App() {
   };
 
   const resetPattern = () => {
-    const resetProject = { ...blankProjectState(), programName };
+    const resetLines = Array.from({ length: MAX_LINES }, (_, lineIndex) => {
+      const currentLine = lines[lineIndex];
+      const emptyLine = makeLine();
+      if (!currentLine) return emptyLine;
+      return {
+        ...emptyLine,
+        timingMode: currentLine.timingMode,
+        patternLength: currentLine.patternLength,
+      };
+    });
     setIsPlaying(false);
     setPlayhead(-1);
     voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
     voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
-    setLineCount(resetProject.lineCount);
-    setScalePresetId(resetProject.scalePresetId ?? "off");
-    setScaleRoot(resetProject.scaleRoot ?? "C");
-    setProjectTempo(resetProject.tempo);
-    setSelectedLine(resetProject.selectedLine);
-    setLines(resetProject.lines);
+    setLines(resetLines);
+  };
+
+  const initCurrentPattern = () => {
+    const ok = window.confirm(`Reset "${programName.trim() || "Untitled"}" to an empty pattern?`);
+    if (!ok) return;
+    resetPattern();
   };
 
   useEffect(() => {
@@ -2683,6 +2694,9 @@ function App() {
                 <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
                   +
                 </button>
+                <button type="button" className="mobile-menu-button" onClick={initCurrentPattern} aria-label="Init pattern" title="Init pattern">
+                  Init
+                </button>
                 <button type="button" className="mobile-menu-button" onClick={() => void saveSelectedPattern()}>
                   Save
                 </button>
@@ -2721,6 +2735,9 @@ function App() {
               </select>
               <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
                 +
+              </button>
+              <button type="button" className="mobile-menu-button" onClick={initCurrentPattern} aria-label="Init pattern" title="Init pattern">
+                Init
               </button>
               <button type="button" className="mobile-menu-button" onClick={() => void saveSelectedPattern()}>
                 Save
