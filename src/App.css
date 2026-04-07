@@ -89,11 +89,107 @@ body {
   gap: 6px;
 }
 
-.library-picker-list button {
+.picker-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.library-picker-list button,
+.pattern-picker-list button,
+.picker-list-button {
   width: 100%;
   min-height: 36px;
   justify-content: flex-start;
   text-align: left;
+}
+
+.picker-delete-button {
+  min-width: 36px;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  color: #ffd8d8;
+}
+
+.picker-delete-button:hover {
+  border-color: #d87979;
+}
+
+.pattern-picker-layout,
+.pattern-picker-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pattern-picker-layout {
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.picker-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.picker-section-label {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #eef2f6;
+}
+
+.pattern-picker-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pattern-picker-panel-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #eef2f6;
+}
+
+.pattern-picker-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pattern-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pattern-picker-list {
+  display: grid;
+  gap: 6px;
+}
+
+.pattern-picker-empty {
+  display: grid;
+  gap: 8px;
+  color: #d8e1ea;
+  font-size: 0.74rem;
+}
+
+.pattern-picker-empty button {
+  justify-self: start;
 }
 
 .new-pattern-modal {
@@ -215,6 +311,14 @@ body {
   min-width: 0;
 }
 
+.app-corner-icon {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
 .desktop-header-summary .mobile-app-name {
   flex: 0 0 auto;
   max-width: none;
@@ -222,6 +326,7 @@ body {
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   border: 1px solid #d0a200;
   border-radius: 6px;
   background: #f0c43a;
@@ -238,6 +343,7 @@ body {
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   border: 1px solid #66717d;
   border-radius: 6px;
   background: #2f353d;
@@ -247,6 +353,16 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pattern-picker-button {
+  cursor: pointer;
+  text-align: left;
+}
+
+.desktop-header-summary .app-corner-icon {
+  width: 38px;
+  height: 38px;
 }
 
 .desktop-header-summary .mobile-summary-actions {
@@ -542,6 +658,14 @@ button.selected {
   height: 24px;
   padding: 0 4px;
   font-size: 0.66rem;
+}
+
+.delay-sync-control button {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .knob-label {
@@ -1055,6 +1179,7 @@ button.selected {
     padding: 0 6px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     border: 1px solid #d0a200;
     border-radius: 6px;
     background: #f0c43a;
@@ -1073,6 +1198,7 @@ button.selected {
     padding: 0 8px;
     display: inline-flex;
     align-items: center;
+    justify-content: flex-start;
     border: 1px solid #66717d;
     border-radius: 6px;
     background: #2f353d;
@@ -1082,6 +1208,16 @@ button.selected {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .app-corner-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .pattern-picker-button {
+    cursor: pointer;
+    text-align: left;
   }
 
   .mobile-summary-actions {
@@ -1113,6 +1249,18 @@ button.selected {
     line-height: 1;
   }
 
+  .pattern-picker-layout {
+    grid-template-columns: minmax(104px, 132px) minmax(0, 1fr);
+  }
+
+  .pattern-picker-footer {
+    justify-content: stretch;
+  }
+
+  .pattern-picker-footer button {
+    flex: 1 1 0;
+  }
+
   .mobile-summary-aux {
     display: flex;
     align-items: center;
@@ -1140,7 +1288,7 @@ button.selected {
 
   .mobile-header-groups {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 2px;
   }
 
@@ -1430,6 +1578,11 @@ button.selected {
     font-size: 0.5rem;
   }
 
+  .delay-sync-control {
+    align-self: end;
+    padding-top: 2px;
+  }
+
   .knob-control {
     width: 100%;
     min-width: 0;
@@ -1440,6 +1593,10 @@ button.selected {
 
   .delay-sync-control {
     overflow: hidden;
+  }
+
+  .delay-sync-control button {
+    justify-self: center;
   }
 
   .knob-label {

@@ -261,7 +261,7 @@ const makeLine = (): LineState => ({
 const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   version: 1,
   programName: "pattern 1",
-  lineCount: 2,
+  lineCount: 3,
   scalePresetId: "off",
   scaleRoot: "C",
   tempo: 126,
@@ -338,7 +338,7 @@ const BLANK_PROJECT_TEMPLATE: ProjectData = (() => {
   return {
     version: 1,
     programName: "pattern 1",
-    lineCount: 2,
+    lineCount: 3,
     scalePresetId: "off",
     scaleRoot: "C",
     tempo: 126,
@@ -427,7 +427,7 @@ type KnobProps = {
   disabled?: boolean;
 };
 
-type MobileHeaderSection = "library" | "pattern" | "scale" | "utilities";
+type MobileHeaderSection = "pattern" | "scale" | "utilities";
 
 function KnobControl({ label, min, max, step = 1, value, onChange, format, disabled = false }: KnobProps) {
   const normalized = (value - min) / (max - min);
@@ -648,6 +648,18 @@ const getLatestUpdatedAt = (libraries: LibraryRecord[], patterns: PatternRecord[
 
 const clampTempo = (value: number): number => Math.min(MAX_TEMPO, Math.max(MIN_TEMPO, Math.round(value)));
 
+const lineHasPatternContent = (line: LineState): boolean => {
+  const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
+  return line.steps.slice(0, voiceLength).some((step) => step.pitch !== null || step.timeMode !== "rest" || step.accent || step.slide || step.transpose !== "none");
+};
+
+const getExportVoiceIndices = (projectLines: LineState[], activeLineCount: 1 | 2 | 3): number[] => {
+  const indices = projectLines
+    .slice(0, activeLineCount)
+    .flatMap((line, index) => (index === 0 || lineHasPatternContent(line) ? [index] : []));
+  return indices.length > 0 ? indices : [0];
+};
+
 function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
@@ -686,8 +698,12 @@ function App() {
   const [googleSyncStatus, setGoogleSyncStatus] = useState<"idle" | "connecting" | "syncing" | "ready">("idle");
   const [googleSyncMessage, setGoogleSyncMessage] = useState("");
   const [isLibraryPickerOpen, setIsLibraryPickerOpen] = useState(false);
+  const [pickerLibraryId, setPickerLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
   const [isNewPatternModalOpen, setIsNewPatternModalOpen] = useState(false);
   const [newPatternName, setNewPatternName] = useState("New Pattern");
+  const [newPatternLibraryId, setNewPatternLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
+  const [isNewLibraryModalOpen, setIsNewLibraryModalOpen] = useState(false);
+  const [newLibraryName, setNewLibraryName] = useState("");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1248,7 +1264,8 @@ function App() {
   }, [lines, selectedLine, tempo, programName]);
 
   const buildExportDataUrl = () => {
-    const exportVoices = Math.max(1, Math.min(3, lineCount));
+    const exportVoiceIndices = getExportVoiceIndices(lines, lineCount);
+    const exportVoices = exportVoiceIndices.length;
     const voiceRows = ["STEP", "TIME", "NOTE", "DOWN", "UP", "ACC", "SLIDE"] as const;
     const voiceBlockHeight = 286;
     const canvas = document.createElement("canvas");
@@ -1274,9 +1291,10 @@ function App() {
     const rowHeight = 30;
     const labelWidth = 110;
 
-    for (let voiceIndex = 0; voiceIndex < exportVoices; voiceIndex += 1) {
+    for (let exportIndex = 0; exportIndex < exportVoices; exportIndex += 1) {
+      const voiceIndex = exportVoiceIndices[exportIndex];
       const voice = lines[voiceIndex];
-      const voiceTop = 120 + voiceIndex * voiceBlockHeight;
+      const voiceTop = 120 + exportIndex * voiceBlockHeight;
       const voiceLength = clampPatternLength(voice.patternLength, voice.timingMode);
       const active = voice.steps.slice(0, voiceLength);
       const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / voiceLength);
@@ -1328,13 +1346,14 @@ function App() {
     if (!url) return;
     setExportPreviewUrl(url);
     const baseProgramName = programName.trim() || "program";
+    const exportVoiceCount = getExportVoiceIndices(lines, lineCount).length;
     const safeProgramName = baseProgramName
       .toLowerCase()
       .replace(/[^a-z0-9-_]+/g, "-")
       .replace(/^-+|-+$/g, "");
     const link = document.createElement("a");
     link.href = url;
-    link.download = `tb303-${safeProgramName || "program"}-${lineCount}voice-sheet-${Date.now()}.png`;
+    link.download = `tb303-${safeProgramName || "program"}-${exportVoiceCount}voice-sheet-${Date.now()}.png`;
     link.click();
   };
   const savePreviewPng = () => {
@@ -1760,9 +1779,7 @@ function App() {
     }
   };
 
-  const createLibrary = async () => {
-    const libraryName = window.prompt("Library name");
-    if (!libraryName) return;
+  const createLibrary = async (libraryName: string) => {
     const trimmed = libraryName.trim();
     if (!trimmed) return;
     const id = `lib-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1776,29 +1793,35 @@ function App() {
       db.close();
     }
     setSelectedLibraryId(id);
+    setPickerLibraryId(id);
     await refreshLocalStorageData();
   };
 
-  const savePatternToLibrary = async (libraryId?: string) => {
-    const patternName = window.prompt("Pattern name", programName.trim() || "Pattern");
-    if (!patternName) return;
-    const trimmed = patternName.trim();
-    if (!trimmed) return;
+  const savePatternRecord = async ({
+    patternId,
+    libraryId,
+    name,
+    createdAt,
+  }: {
+    patternId?: string;
+    libraryId: string;
+    name: string;
+    createdAt?: number;
+  }) => {
     const now = Date.now();
-    const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const targetLibraryId = libraryId ?? selectedLibraryId;
+    const id = patternId ?? `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const db = await openLocalDb();
     try {
       await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
         tx.objectStore(PATTERNS_STORE).put({
           id,
-          libraryId: targetLibraryId,
-          name: trimmed,
+          libraryId,
+          name,
           project: JSON.parse(JSON.stringify(buildProjectSnapshot())) as ProjectData,
-          createdAt: now,
+          createdAt: createdAt ?? now,
           updatedAt: now,
         } satisfies PatternRecord);
-        const libReq = tx.objectStore(LIBRARIES_STORE).get(targetLibraryId);
+        const libReq = tx.objectStore(LIBRARIES_STORE).get(libraryId);
         libReq.onsuccess = () => {
           const lib = libReq.result as LibraryRecord | undefined;
           if (lib) {
@@ -1810,43 +1833,64 @@ function App() {
       db.close();
     }
     await refreshLocalStorageData();
+    setSelectedLibraryId(libraryId);
+    setSelectedPatternId(id);
+    return id;
   };
 
   const saveSelectedPattern = async () => {
     const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
+    const targetLibraryId = selectedLibraryId;
+    const targetName = programName.trim() || selectedPattern?.name || "Pattern";
+    const nameMatch = patterns.find((pattern) => pattern.libraryId === targetLibraryId && pattern.name === targetName);
+
     if (!selectedPattern) {
-      await savePatternToLibrary(selectedLibraryId);
+      if (nameMatch) {
+        const ok = window.confirm(`Pattern "${targetName}" already exists in this lib. Overwrite it?`);
+        if (!ok) return;
+        await savePatternRecord({
+          patternId: nameMatch.id,
+          libraryId: targetLibraryId,
+          name: targetName,
+          createdAt: nameMatch.createdAt,
+        });
+        return;
+      }
+      await savePatternRecord({ libraryId: targetLibraryId, name: targetName });
       return;
     }
-    const now = Date.now();
-    const db = await openLocalDb();
-    try {
-      await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
-        tx.objectStore(PATTERNS_STORE).put({
-          ...selectedPattern,
-          project: JSON.parse(JSON.stringify(buildProjectSnapshot())) as ProjectData,
-          updatedAt: now,
-        } satisfies PatternRecord);
-        const libReq = tx.objectStore(LIBRARIES_STORE).get(selectedLibraryId);
-        libReq.onsuccess = () => {
-          const lib = libReq.result as LibraryRecord | undefined;
-          if (lib) {
-            tx.objectStore(LIBRARIES_STORE).put({ ...lib, updatedAt: now });
-          }
-        };
+
+    if (targetName === selectedPattern.name) {
+      await savePatternRecord({
+        patternId: selectedPattern.id,
+        libraryId: targetLibraryId,
+        name: selectedPattern.name,
+        createdAt: selectedPattern.createdAt,
       });
-    } finally {
-      db.close();
+      return;
     }
-    await refreshLocalStorageData();
+
+    if (nameMatch && nameMatch.id !== selectedPattern.id) {
+      const ok = window.confirm(`Pattern "${targetName}" already exists in this lib. Overwrite it?`);
+      if (!ok) return;
+      await savePatternRecord({
+        patternId: nameMatch.id,
+        libraryId: targetLibraryId,
+        name: targetName,
+        createdAt: nameMatch.createdAt,
+      });
+      return;
+    }
+
+    await savePatternRecord({ libraryId: targetLibraryId, name: targetName });
   };
 
-  const createEmptyPattern = async (patternName: string) => {
+  const createEmptyPattern = async (patternName: string, libraryId = selectedLibraryId) => {
     const trimmed = patternName.trim();
     if (!trimmed) return;
     const now = Date.now();
     const id = `pat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const targetLibraryId = selectedLibraryId;
+    const targetLibraryId = libraryId;
     const emptyProject: ProjectData = { ...blankProjectState(), programName: trimmed };
 
     const db = await openLocalDb();
@@ -1883,9 +1927,11 @@ function App() {
     });
   };
 
-  const openNewPatternModal = () => {
+  const openNewPatternModal = (libraryId = selectedLibraryId) => {
     setNewPatternName("New Pattern");
+    setNewPatternLibraryId(libraryId);
     setMobileProjectOpen(false);
+    setIsLibraryPickerOpen(false);
     setIsNewPatternModalOpen(true);
   };
 
@@ -1896,15 +1942,33 @@ function App() {
       return;
     }
     setIsNewPatternModalOpen(false);
-    await createEmptyPattern(trimmed);
+    await createEmptyPattern(trimmed, newPatternLibraryId);
   };
 
-  const openUnsavedEmptyPattern = () => {
+  const openNewLibraryModal = () => {
+    setNewLibraryName("");
+    setMobileProjectOpen(false);
+    setIsLibraryPickerOpen(false);
+    setIsNewLibraryModalOpen(true);
+  };
+
+  const submitNewLibrary = async () => {
+    const trimmed = newLibraryName.trim();
+    if (!trimmed) {
+      window.alert("Library name is required.");
+      return;
+    }
+    setIsNewLibraryModalOpen(false);
+    await createLibrary(trimmed);
+  };
+
+  const openUnsavedEmptyPattern = (libraryId = selectedLibraryId) => {
     const emptyProject: ProjectData = { ...blankProjectState(), programName: "Untitled" };
+    setSelectedLibraryId(libraryId);
     setSelectedPatternId("");
     loadPattern({
       id: "unsaved-empty",
-      libraryId: selectedLibraryId,
+      libraryId,
       name: "Untitled",
       project: emptyProject,
       createdAt: Date.now(),
@@ -1934,7 +1998,7 @@ function App() {
     }
   };
 
-  const deletePattern = async (patternId: string) => {
+  const deletePatternById = async (patternId: string) => {
     const db = await openLocalDb();
     try {
       await runWrite(db, [PATTERNS_STORE], (tx) => {
@@ -1946,38 +2010,54 @@ function App() {
     await refreshLocalStorageData();
   };
 
-  const deleteLibrary = async () => {
-    if (selectedLibraryId === "default") {
+  const deletePatternRecord = async (pattern: PatternRecord) => {
+    const ok = window.confirm(`Delete pattern "${pattern.name}"?`);
+    if (!ok) return;
+    await deletePatternById(pattern.id);
+    if (pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId) {
+      openUnsavedEmptyPattern(pattern.libraryId);
+    }
+  };
+
+  const deleteLibraryById = async (libraryId: string) => {
+    if (libraryId === "default") {
       window.alert("dlib cannot be deleted.");
       return;
     }
-    const currentLibrary = libraries.find((library) => library.id === selectedLibraryId);
-    const ok = window.confirm(`Delete library "${currentLibrary?.name ?? selectedLibraryId}" and all its patterns?`);
+    const currentLibrary = libraries.find((library) => library.id === libraryId);
+    const ok = window.confirm(`Delete library "${currentLibrary?.name ?? libraryId}" and all its patterns?`);
     if (!ok) return;
     const db = await openLocalDb();
     try {
       const allPatterns = await getAllFromStore<PatternRecord>(db, PATTERNS_STORE);
-      const idsToDelete = allPatterns.filter((pattern) => pattern.libraryId === selectedLibraryId).map((pattern) => pattern.id);
+      const idsToDelete = allPatterns.filter((pattern) => pattern.libraryId === libraryId).map((pattern) => pattern.id);
       await runWrite(db, [PATTERNS_STORE, LIBRARIES_STORE], (tx) => {
         const patternStore = tx.objectStore(PATTERNS_STORE);
         idsToDelete.forEach((id) => patternStore.delete(id));
-        tx.objectStore(LIBRARIES_STORE).delete(selectedLibraryId);
+        tx.objectStore(LIBRARIES_STORE).delete(libraryId);
       });
     } finally {
       db.close();
     }
-    setSelectedLibraryId("default");
+    if (pickerLibraryId === libraryId) {
+      setPickerLibraryId("default");
+    }
+    if (selectedLibraryId === libraryId) {
+      await refreshLocalStorageData();
+      openUnsavedEmptyPattern("default");
+      return;
+    }
     await refreshLocalStorageData();
   };
 
   const runStorageAction = async (action: string) => {
     if (!action) return;
     if (action === "set-voices") {
-      const value = window.prompt("Voices (1-3)", String(lineCount));
+      const value = window.prompt("Voice number (1-3)", String(lineCount));
       if (value === null) return;
       const parsed = Number(value);
       if (parsed !== 1 && parsed !== 2 && parsed !== 3) {
-        window.alert("Voices must be 1, 2, or 3.");
+        window.alert("Voice number must be 1, 2, or 3.");
         return;
       }
       setLineCount(parsed);
@@ -1996,7 +2076,7 @@ function App() {
       return;
     }
     if (action === "set-library") {
-      setIsLibraryPickerOpen(true);
+      openPatternPicker();
       return;
     }
     if (action === "export-json") {
@@ -2017,12 +2097,12 @@ function App() {
         window.alert("dlib cannot be deleted.");
         return;
       }
-      await deleteLibrary();
+      await deleteLibraryById(selectedLibraryId);
       return;
     }
 
     if (action === "new-library") {
-      await createLibrary();
+      openNewLibraryModal();
       return;
     }
 
@@ -2056,10 +2136,7 @@ function App() {
     }
 
     if (action === "delete-pattern") {
-      const ok = window.confirm(`Delete pattern "${selectedPattern.name}"?`);
-      if (!ok) return;
-      await deletePattern(selectedPattern.id);
-      openUnsavedEmptyPattern();
+      await deletePatternRecord(selectedPattern);
       return;
     }
   };
@@ -2079,9 +2156,13 @@ function App() {
   };
 
   useEffect(() => {
-    const url = buildExportDataUrl();
-    if (url) setExportPreviewUrl(url);
-  }, [lines, selectedLine, tempo, programName]);
+    if (workspaceView !== "sheet") return;
+    const timeoutId = window.setTimeout(() => {
+      const url = buildExportDataUrl();
+      if (url) setExportPreviewUrl(url);
+    }, 120);
+    return () => window.clearTimeout(timeoutId);
+  }, [workspaceView, lines, lineCount, tempo, programName]);
 
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 980px)");
@@ -2120,6 +2201,7 @@ function App() {
   const patternLength = clampPatternLength(lines[selectedLine].patternLength, selectedTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const selectedSavedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
+  const pickerPatterns = patterns.filter((pattern) => pattern.libraryId === pickerLibraryId);
   const shouldShowRotateOverlay = false;
   const controlsToggleLabel = "Controls";
   const modifiersToggleLabel = "Mods";
@@ -2225,33 +2307,14 @@ function App() {
     setMobileProjectOpen(true);
   };
 
+  const openPatternPicker = () => {
+    setPickerLibraryId(selectedLibraryId);
+    setIsLibraryPickerOpen(true);
+    setMobileProjectOpen(false);
+  };
+
   const renderMobileHeaderPanel = () => {
     if (!mobileProjectOpen) return null;
-
-    if (mobileHeaderSection === "library") {
-      return (
-        <div className="mobile-group-panel" id="mobile-header-panel">
-          <label className="mobile-group-field">
-            Library
-            <select value={selectedLibraryId} onChange={(e) => setSelectedLibraryId(e.currentTarget.value)}>
-              {libraries.map((library) => (
-                <option key={library.id} value={library.id}>
-                  {library.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="mobile-group-actions">
-            <button type="button" onClick={() => void runStorageAction("new-library")}>
-              New
-            </button>
-            <button type="button" onClick={() => void runStorageAction("delete-library")} disabled={selectedLibraryId === "default"}>
-              Delete
-            </button>
-          </div>
-        </div>
-      );
-    }
 
     if (mobileHeaderSection === "pattern") {
       return (
@@ -2260,17 +2323,6 @@ function App() {
             Name
             <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
           </label>
-          <label className="mobile-group-field">
-            Pattern
-            <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
-              <option value="">Select...</option>
-              {visiblePatterns.map((pattern) => (
-                <option key={pattern.id} value={pattern.id}>
-                  {pattern.name}
-                </option>
-              ))}
-            </select>
-          </label>
           <div className="mobile-group-actions">
             <button type="button" onClick={resetPattern}>
               Init
@@ -2278,7 +2330,7 @@ function App() {
             <button type="button" onClick={() => void runStorageAction("set-length")}>
               Len {patternLength}
             </button>
-            <button type="button" onClick={() => void runStorageAction("new-pattern")}>
+            <button type="button" onClick={() => openNewPatternModal(selectedLibraryId)}>
               New
             </button>
             <button type="button" onClick={() => void runStorageAction("delete-pattern")} disabled={!selectedSavedPattern}>
@@ -2325,7 +2377,7 @@ function App() {
       <div className="mobile-group-panel" id="mobile-header-panel">
         <div className="mobile-group-actions mobile-group-actions-grid">
           <button type="button" onClick={() => void runStorageAction("set-voices")}>
-            Voices {lineCount}
+            Voice number {lineCount}
           </button>
           <button type="button" onClick={isFullscreen ? exitFullscreen : enterFullscreen}>
             {isFullscreen ? "Exit Full" : "Full"}
@@ -2334,13 +2386,13 @@ function App() {
             Import
           </button>
           <button type="button" onClick={() => void runStorageAction("export-json")}>
-            Export JSON
+            Export
           </button>
           <button type="button" onClick={() => void runStorageAction("export-png")}>
             Export PNG
           </button>
           <button type="button" onClick={() => void runStorageAction(googleAccessToken ? "google-drive-backup-now" : "google-drive-connect")}>
-            {googleAccessToken ? "Backup" : "Drive"}
+            {googleAccessToken ? "Backup" : "Google Drive"}
           </button>
         </div>
         {googleSyncMessage ? <span className={`google-sync-status mobile-google-sync-status ${googleSyncStatus}`}>{googleSyncMessage}</span> : null}
@@ -2388,6 +2440,44 @@ function App() {
           </div>
         </div>
       ) : null}
+      {isNewLibraryModalOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setIsNewLibraryModalOpen(false)}>
+          <div
+            className="modal-card new-pattern-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-library-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="new-library-title">New library</h2>
+              <button type="button" onClick={() => setIsNewLibraryModalOpen(false)}>
+                Close
+              </button>
+            </div>
+            <form
+              className="modal-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitNewLibrary();
+              }}
+            >
+              <label className="modal-form-field">
+                Library name
+                <input autoFocus type="text" value={newLibraryName} onChange={(event) => setNewLibraryName(event.currentTarget.value)} />
+              </label>
+              <div className="modal-actions">
+                <button type="button" onClick={() => setIsNewLibraryModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="selected">
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
       {isLibraryPickerOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setIsLibraryPickerOpen(false)}>
           <div
@@ -2398,25 +2488,88 @@ function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-header">
-              <h2 id="library-picker-title">Choose library</h2>
+              <h2 id="library-picker-title">Libraries & patterns</h2>
               <button type="button" onClick={() => setIsLibraryPickerOpen(false)}>
                 Close
               </button>
             </div>
-            <div className="library-picker-list">
-              {libraries.map((library) => (
-                <button
-                  key={library.id}
-                  type="button"
-                  className={library.id === selectedLibraryId ? "selected" : ""}
-                  onClick={() => {
-                    setSelectedLibraryId(library.id);
-                    setIsLibraryPickerOpen(false);
-                  }}
-                >
-                  {library.name}
-                </button>
-              ))}
+            <div className="pattern-picker-layout">
+              <div className="picker-section">
+                <div className="picker-section-label">Libraries</div>
+                <div className="library-picker-list">
+                  {libraries.map((library) => (
+                    <div key={library.id} className="picker-list-row">
+                      <button
+                        type="button"
+                        className={library.id === pickerLibraryId ? "selected picker-list-button" : "picker-list-button"}
+                        onClick={() => {
+                          setPickerLibraryId(library.id);
+                          setSelectedLibraryId(library.id);
+                        }}
+                      >
+                        {library.name}
+                      </button>
+                      {library.id !== "default" ? (
+                        <button
+                          type="button"
+                          className="picker-delete-button"
+                          aria-label={`Delete library ${library.name}`}
+                          title={`Delete ${library.name}`}
+                          onClick={() => void deleteLibraryById(library.id)}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="pattern-picker-panel picker-section">
+                <div className="pattern-picker-panel-header">
+                  <div className="pattern-picker-panel-title">Patterns</div>
+                </div>
+                {pickerPatterns.length > 0 ? (
+                  <div className="pattern-picker-list">
+                    {pickerPatterns.map((pattern) => (
+                      <div key={pattern.id} className="picker-list-row">
+                        <button
+                          type="button"
+                          className={pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId ? "selected picker-list-button" : "picker-list-button"}
+                          onClick={() => {
+                            setSelectedLibraryId(pattern.libraryId);
+                            setSelectedPatternId(pattern.id);
+                            loadPattern(pattern);
+                            setIsLibraryPickerOpen(false);
+                          }}
+                        >
+                          {pattern.name}
+                        </button>
+                        <button
+                          type="button"
+                          className="picker-delete-button"
+                          aria-label={`Delete pattern ${pattern.name}`}
+                          title={`Delete ${pattern.name}`}
+                          onClick={() => void deletePatternRecord(pattern)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="pattern-picker-empty">
+                    <span>Empty lib</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="pattern-picker-footer">
+              <button type="button" onClick={() => openNewPatternModal(pickerLibraryId)}>
+                Create pattern
+              </button>
+              <button type="button" onClick={openNewLibraryModal}>
+                Create lib
+              </button>
             </div>
           </div>
         </div>
@@ -2437,16 +2590,6 @@ function App() {
               </button>
             </div>
             <div className="mobile-header-groups" role="tablist" aria-label="Header menu groups">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mobileHeaderSection === "library"}
-                className={mobileHeaderSection === "library" ? "selected" : ""}
-                onClick={() => toggleMobileHeaderSection("library")}
-                aria-controls="mobile-header-panel"
-              >
-                Library
-              </button>
               <button
                 type="button"
                 role="tab"
@@ -2492,11 +2635,33 @@ function App() {
         {isMobileViewport ? (
           <>
             <div className="mobile-header-summary">
-              <div className="mobile-app-name">TB-303 util</div>
+              <img className="app-corner-icon" src="/icon_knob.svg" alt="" aria-hidden="true" />
+              <button type="button" className="mobile-app-name" onClick={() => setMobileProjectOpen(true)} aria-label="Open settings menu">
+                TB-303 util
+              </button>
+              <button type="button" className="mobile-pattern-display pattern-picker-button" title={currentPatternLabel} onClick={openPatternPicker}>
+                {currentPatternLabel}
+              </button>
               <div className="mobile-summary-actions">
                 <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                   {isPlaying ? "Stop" : "Play"}
                 </button>
+                <select
+                  className="mobile-length-select"
+                  aria-label="Pattern length"
+                  title="Pattern length"
+                  value={patternLength}
+                  onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
+                >
+                  {Array.from({ length: 13 }, (_, index) => {
+                    const length = index + 4;
+                    return (
+                      <option key={length} value={length}>
+                        {length}
+                      </option>
+                    );
+                  })}
+                </select>
                 <button
                   type="button"
                   className={`mobile-controls-toggle ${mobileControlsOpen ? "selected" : ""}`}
@@ -2515,40 +2680,50 @@ function App() {
                 >
                   {modifiersToggleLabel}
                 </button>
-                <button type="button" className="mobile-menu-button" onClick={openNewPatternModal} aria-label="New pattern" title="New pattern">
+                <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
                   +
                 </button>
                 <button type="button" className="mobile-menu-button" onClick={() => void saveSelectedPattern()}>
                   Save
                 </button>
-                <button type="button" className="mobile-menu-button" onClick={() => setMobileProjectOpen(true)} aria-label="Settings" title="Settings">
-                  ⚙
-                </button>
-                <div className="mobile-pattern-display" title={currentPatternLabel}>
-                  {currentPatternLabel}
-                </div>
                 {renderAuxControls("mobile-summary-aux")}
               </div>
             </div>
           </>
         ) : (
           <div className="mobile-header-summary desktop-header-summary">
-            <div className="mobile-app-name">TB-303 util</div>
-            <div className="mobile-pattern-display" title={currentPatternLabel}>
+            <img className="app-corner-icon" src="/icon_knob.svg" alt="" aria-hidden="true" />
+            <button type="button" className="mobile-app-name" onClick={() => setMobileProjectOpen(true)} aria-label="Open settings menu">
+              TB-303 util
+            </button>
+            <button type="button" className="mobile-pattern-display pattern-picker-button" title={currentPatternLabel} onClick={openPatternPicker}>
               {currentPatternLabel}
-            </div>
+            </button>
             <div className="mobile-summary-actions">
               <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                 {isPlaying ? "Stop" : "Play"}
               </button>
-              <button type="button" className="mobile-menu-button" onClick={openNewPatternModal} aria-label="New pattern" title="New pattern">
+              <select
+                className="mobile-length-select"
+                aria-label="Pattern length"
+                title="Pattern length"
+                value={patternLength}
+                onChange={(event) => updateVoicePatternLength(Number(event.currentTarget.value))}
+              >
+                {Array.from({ length: 13 }, (_, index) => {
+                  const length = index + 4;
+                  return (
+                    <option key={length} value={length}>
+                      {length}
+                    </option>
+                  );
+                })}
+              </select>
+              <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
                 +
               </button>
               <button type="button" className="mobile-menu-button" onClick={() => void saveSelectedPattern()}>
                 Save
-              </button>
-              <button type="button" className="mobile-menu-button" onClick={() => setMobileProjectOpen(true)} aria-label="Settings" title="Settings">
-                ⚙
               </button>
             </div>
           </div>

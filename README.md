@@ -1,434 +1,218 @@
 # 303 util User Manual
 
-**303 util** is a compact TB-303 pattern editor, playback tool, and printable pattern-sheet generator. This manual is written for end users and covers the full app workflow: creating libraries, building patterns, working with 1-3 voices, using scale mode, exporting sheets, saving and opening project files, and backing up your saved work to Google Drive.
+**303 util** is a compact TB-303 pattern editor, multi-voice sketchpad, and sheet generator. The main workflow is simple: create or load a pattern, build it in the editor, shape the sound for each voice, and export a clean TB-303-style chart from **Sheet** view.
 
 The original sound engine code is based on [thedjinn/js303](https://github.com/thedjinn/js303).
 
-![303 util main screen](docs/screenshots/overview-main.png)
+![Desktop editor overview](docs/screenshots/desktop-editor-overview.png)
 
 ## Quick start
 
-If you just want to make your first pattern quickly:
-
-1. Open the app.
-2. Type a name in **Program**.
-3. In **Editor**, click notes into the grid.
-4. Set the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
+1. Open the app and click the pattern name strip to choose a library and pattern, or click **+** to start a new one.
+2. In **Editor**, click notes into the pitch grid.
+3. Set each step in the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
+4. Add **DOWN**, **UP**, **ACC**, and **SLIDE** where needed.
 5. Press **Play** to hear the pattern.
-6. Use **Save** to store it as a pattern.
-7. Open **Sheet**, click **Refresh**, then **Save PNG** to export a printable chart.
+6. Click **Save** to store it in the current library.
+7. Switch to **Sheet**, click **Refresh**, then **Save PNG** to export the chart.
 
-## Interface at a glance
+## Interface overview
 
-![Top bar and main actions](docs/screenshots/header-options.png)
-
-The app is organized into four working areas:
+The main screen is built around a few controls you will use constantly:
 
 | Area | What it does |
 | --- | --- |
-| **Top bar** | Playback, reset, save, timing mode, program name, pattern selection, root note, scale mode, and the main menu |
-| **Controls** | BPM, waveform, synth settings, and FX for the selected voice |
-| **Editor** | Pitch grid and step controls for building the sequence |
-| **Sheet** | Generates a clean export of the active project as a PNG |
+| **TB-303 util button** | Opens the main menu and project options |
+| **Pattern name strip** | Shows the current `library > pattern` and opens the library/pattern picker |
+| **Play / + / Save** | Playback, new pattern, and save actions |
+| **Controls / Mods** | On compact layouts, show or hide the sound controls and step modifier lanes |
+| **Voice buttons** | Choose voice `1`, `2`, or `3` for editing |
+| **Editor / Sheet** | Switch between sequencing and printable export |
 
-## Core workflow: how a project is organized
+![Compact mobile toolbar and controls](docs/screenshots/mobile-controls.png)
 
-The app works with three levels:
+## Libraries, patterns, and saving
 
-| Item | Meaning |
-| --- | --- |
-| **Program** | The current working project name shown in the top bar |
-| **Pattern** | A saved pattern you can open later |
-| **Library** | A collection of saved patterns |
+The app organizes your work into **libraries** and **patterns**:
+
+- A **library** is a collection.
+- A **pattern** is one saved project inside that collection.
+- The name strip always shows which library and pattern you are editing.
 
 Important behavior:
 
-- Editing the grid or controls changes what you are currently working on immediately.
-- Those edits are **not added to the pattern library until you save**.
-- Choosing another pattern from the **Pattern** list loads it right away, so save first if you want to keep your changes.
+- Changes in the editor and controls happen immediately.
+- Those changes are **not stored in the library until you click Save**.
+- If you switch to another pattern before saving, your current unsaved edits can be lost.
 
-## Top bar controls
+### Open a library or pattern
 
-![Top bar controls](docs/screenshots/header-options.png)
+Click the name strip at the top of the app. On some layouts, the same actions are also available from the main menu.
 
-### Play / Stop
-
-Starts or stops playback of the active project.
-
-### Reset
-
-Restores the built-in default pattern for the current project view. This resets the working pattern back to the app's default starting state.
-
-### Save
-
-Saves the current working project to the selected pattern.
-
-- If a saved pattern is already selected, it updates that pattern.
-- If no saved pattern is selected yet, the app asks for a name and creates a new saved pattern.
-
-### Timing button (`♪` / `♪₃`)
-
-Switches the timing mode for the project.
-
-- **`♪`** = normal timing, with pattern lengths from **4 to 16** steps per voice
-- **`♪₃`** = triplet timing, with pattern lengths from **4 to 12** steps per voice
-
-If you switch timing mode and a voice is longer than the new limit, its visible length is reduced automatically.
-
-### Program
-
-This is the name of the current working project. It is also used in exported file names.
-
-### Pattern
-
-Shows saved patterns in the currently selected library. Selecting one opens it immediately.
-
-### Root
-
-Chooses the root note used by **Scale** mode.
-
-- The root selector is available in the top bar.
-- It becomes active when a scale is selected.
-- The root note row in the editor is highlighted with its own color.
-
-### Scale
-
-Turns scale mode **Off** or loads one of the available scales or chord shapes.
-
-- Choose **Off** if you do not want note highlighting.
-- Choose any scale preset to highlight notes that belong to that scale.
-- The selector shows the current preset name, for example **Harmonic Minor**.
-- The selected root note uses one highlight color.
-- The rest of the notes that belong to the selected scale use a second highlight color.
-
-### Menu...
-
-This is where project management and storage actions live:
-
-- **Voices**
-- **Length**
-- **Library**
-- **Export JSON**
-- **Export PNG**
-- **Import JSON**
-- **New Pattern**
-- **Save Pattern**
-- **Delete Pattern**
-- **New Library**
-- **Delete Library**
-- **Connect Google Drive**
-- **Backup to Google Drive now**
-
-## How to create and manage libraries
-
-Libraries help you organize pattern collections by song, live set, style, or project.
-
-### Create a new library
-
-1. Open **Menu...**
-2. Choose **New Library**
-3. Enter a library name
-
-The new library becomes the active library immediately.
-
-### Switch to another library
-
-1. Open **Menu...**
-2. Choose **Library**
-3. Type the library name
-4. Confirm
-
-Only patterns from the selected library appear in the **Pattern** list.
-
-### Delete a library
-
-1. Open **Menu...**
-2. Choose **Delete Library**
-3. Confirm deletion
-
-Important:
-
-- Deleting a library also deletes **all patterns inside it**.
-- **Default Library** cannot be deleted.
-
-## How to create, save, load, and delete patterns
-
-### Create a new empty pattern
-
-1. Open **Menu...**
-2. Choose **New Pattern**
-3. Enter a pattern name
-
-This creates a fresh blank pattern in the current library and opens it immediately.
-
-### Save the current project as a pattern
+### Create a new pattern
 
 Use either:
 
-- **Save** in the top bar, or
-- **Menu... > Save Pattern**
+- **+** in the top bar, or
+- the **Pattern** section inside the menu
 
-If the current project has not been saved before, the app asks for a pattern name and creates it in the current library.
+New patterns open as blank projects so you can start sequencing right away.
 
-### Load a saved pattern
+### Save a pattern
 
-1. Open the **Pattern** drop-down in the top bar
-2. Select the pattern you want
+Click **Save**.
 
-The selected pattern loads immediately.
+- If the current pattern already exists, it is updated.
+- If it is still unsaved, the app asks for a name and creates it in the current library.
 
-### Delete a pattern
+### Create, switch, or delete libraries
 
-1. Select the pattern you want to remove
-2. Open **Menu...**
-3. Choose **Delete Pattern**
-4. Confirm
+Open the menu, then use the **Library** section to:
 
-After deletion, the app opens a new blank unsaved pattern.
+- choose a different library
+- create a new library
+- delete the current library
 
-## Multi-303 support: working with 1, 2, or 3 voices
+The default library (`dlib`) cannot be deleted.
 
-303 util can run up to **three independent 303 voices** in one project.
+![Menu with library management](docs/screenshots/mobile-menu.png)
 
-![Main workspace with voice switching](docs/screenshots/overview-main.png)
+## Building a pattern in Editor
 
-### Set the number of voices
+The **Editor** is where you write the sequence for the selected voice.
 
-1. Open **Menu...**
-2. Choose **Voices**
-3. Enter `1`, `2`, or `3`
+![Compact mobile editor view](docs/screenshots/mobile-editor-compact.png)
 
-### Edit a specific voice
+### Add notes
 
-Use the **VOICE 1**, **VOICE 2**, and **VOICE 3** buttons to choose which voice you are editing.
+Click any cell in the pitch grid to place a note on that step. Click the same note again to clear it.
 
-Each voice has its own:
+### Set the step type
 
-- notes
-- step modifiers
-- pattern length
-- waveform
-- synth settings
-- FX settings
-
-### What multi-voice means in practice
-
-- Playback runs all active voices together.
-- You edit one voice at a time.
-- The **Sheet** export includes all active voices.
-- A saved pattern stores all active voices together, not only the voice you are editing.
-
-## How to build a pattern in the Editor
-
-![Editor and sequencer lanes](docs/screenshots/mobile-sequencer.png)
-
-In **Editor** view, the selected voice is edited step by step.
-
-### Add or remove notes
-
-Click a cell in the pitch grid to place a note on that step.
-
-### Use scale mode while editing
-
-If you want visual note guidance:
-
-1. Choose a **Scale** in the top bar
-2. Choose a **Root**
-3. Return to the pitch grid and place notes as usual
-
-![Scale mode in the pitch editor](docs/screenshots/scale-mode.png)
-
-What you will see:
-
-- the **root note row** is highlighted in its own color
-- the other **notes inside the selected scale** are highlighted in a different color
-- notes outside the scale stay unhighlighted
-
-Scale mode is a visual guide only. It does not block you from placing notes outside the highlighted rows.
-
-### Choose the step type
-
-Use the **TIME** row at the bottom of the editor:
+Use the **TIME** row at the bottom:
 
 - **N** = note
 - **T** = tie
 - **R** = rest
 
-### Use the performance lanes
+### Use the classic 303 modifier lanes
 
-The rows above **TIME** add classic 303 sequencing behavior:
+The rows above **TIME** add performance behavior to note steps:
 
-- **DOWN**: transpose the note down
-- **UP**: transpose the note up
+- **DOWN**: transpose the note down one octave
+- **UP**: transpose the note up one octave
 - **ACC**: accent the note
-- **SLIDE**: glide from the previous note into this one
+- **SLIDE**: glide into the note from the previous one
 
-These options work only on active note steps.
+### Work with multiple voices
 
-### Change the pattern length
+Use the voice buttons to choose which line you are editing.
 
-Pattern length is set per voice.
+Each voice has its own:
 
-1. Select the voice you want to edit
-2. Open **Menu...**
-3. Choose **Length**
-4. Enter the new step count
+- notes and modifiers
+- pattern length
+- waveform and synth settings
+- delay, distortion, and reverb settings
 
-Limits:
+Playback runs all active voices together, but you edit one voice at a time.
 
-- **Normal** mode: 4-16 steps
-- **Triplet** mode: 4-12 steps
+![Compact toolbar with voice and workspace buttons](docs/screenshots/mobile-toolbar-compact.png)
 
-## Sound controls and FX
+## Sound controls
 
-![Main controls area](docs/screenshots/overview-main.png)
+The control strip always edits the **currently selected voice**.
 
-The controls section always edits the **currently selected voice**.
+### Main controls
 
-### Main synth controls
-
-- **BPM**: playback speed for the whole project
-- **Wave**: saw or square waveform
+- **BPM**: overall tempo
+- **1/2**: halves the current tempo until you toggle it back
+- **Wave**: switches between saw and square
 - **Tune**: pitch offset
-- **Cutoff**: filter brightness
-- **Resonance**: filter peak intensity
-- **Env Mod**: filter envelope amount
-- **Decay**: note length and contour
-- **Accent**: strength of accented notes
+- **Cutoff**
+- **Resonance / RES**
+- **Env Mod / ENV**
+- **Decay**
+- **Accent / ACC**
+- **Volume / VOL**
 
-### FX controls
+### Delay and FX
 
-- **SYNC / FREE**: choose tempo-synced delay or manual delay time
-- **Delay subdivision**: rhythmic delay value when sync is on
-- **Delay Time**: manual delay time when sync is off
-- **Feedback**
-- **Delay Mix**
-- **Distortion**
-- **Reverb**
-- **Volume**
+- **SYNC / FREE** or **S / F**: tempo-synced delay or manual delay time
+- **Subdivision**: rhythmic delay value when sync is on
+- **Delay Time / TIME**
+- **Feedback / FDBK**
+- **Mix**
+- **Distortion / DIST**
+- **Reverb / REV**
 
-Tip: select a different voice first if you want different sound settings per voice.
+On phones and small screens, use **Controls** to show or hide the knob section and **Mods** to show or hide the sequencing lanes.
 
-## Sheet view and PNG export
+## Scales, length, and project settings
 
-The **Sheet** view creates a clean pattern chart for printing, sharing, or storing with your music notes.
+Use the menu to reach the project options:
 
-![Sheet preview and export](docs/screenshots/sheet-export.png)
+- **Scale** and **Root** highlighting for guided note placement
+- **Length** for the active voice
+- **Voices** to switch between 1, 2, or 3 voice projects
+- **Import** and **Export JSON**
+- **Export PNG**
+- **Drive / Backup** when Google Drive sync is configured
 
-### Export a pattern sheet
+Scale highlighting is visual guidance only. It helps you see matching notes, but it does not prevent entering notes outside the selected scale.
 
-1. Set the project up the way you want it
-2. Set the number of voices in **Menu... > Voices**
-3. Switch to **Sheet**
-4. Click **Refresh**
-5. Click **Save PNG**
+## Sheet export: printable real-303 charts
 
-The PNG export includes:
+This is the key output of the app: a clean **TB-303 Pattern Chart** you can save, print, or share.
 
-- program name
+![Sheet export preview](docs/screenshots/sheet-export-current.png)
+
+### Export a sheet
+
+1. Finish the pattern you want to document.
+2. Choose the voice or voices you want included.
+3. Switch to **Sheet**.
+4. Click **Refresh**.
+5. Click **Save PNG**.
+
+The exported chart includes:
+
+- the program name
 - BPM
-- all active voices
-- note rows
-- transpose, accent, slide, and time information
+- the number of voices exported
+- a separate block for each exported voice
+- step columns
+- **TIME**, **NOTE**, **DOWN**, **UP**, **ACC**, and **SLIDE** rows
 
-## JSON import and export
+This makes the export practical as a real 303 reference sheet, not just a screenshot of the editor.
 
-Use project files when you want to move one pattern setup between devices, keep manual backups, or send it to someone else.
+## JSON import/export and backup
 
 ### Export JSON
 
-1. Open **Menu...**
-2. Choose **Export JSON**
-
-This downloads what you are currently working on as a project file.
+Use **Export JSON** when you want a project file you can archive, move to another device, or send to someone else.
 
 ### Import JSON
 
-1. Open **Menu...**
-2. Choose **Import JSON**
-3. Select a project file you exported earlier
+Use **Import** to load a project file back into the app. After importing, click **Save** if you also want it added to the current library.
 
-The imported project opens immediately.
+### Google Drive backup
 
-Important:
-
-- Importing JSON does **not** automatically save it into your pattern library.
-- If you want it available in the **Pattern** list later, use **Save** after importing.
-
-## Google Drive backup and sync
-
-Google Drive support is for backing up your saved libraries and patterns.
-
-### Connect Google Drive
-
-1. Open **Menu...**
-2. Choose **Connect Google Drive**
-3. Sign in and approve access if prompted
-
-When the connection succeeds, the app checks Google Drive for the latest backup.
-
-**Configuration note**
-
-- The browser build uses `VITE_GOOGLE_CLIENT_ID`.
-- Installed app builds use `VITE_GOOGLE_DESKTOP_CLIENT_ID` as the native Google client id passed to the app.
-- On Android, Google Cloud must also have a separate **Android** OAuth client for package verification with package name `com.app.app` and the APK signing SHA-1. That Android client is not passed through Vite env vars.
-
-### What happens when you connect
-
-- If no backup exists yet, the app stays connected and is ready to create one.
-- If Google Drive has newer saved data than the current device, the app restores that backup locally.
-- If your local saved data is newer, the app keeps your local data.
-- The backup file is stored in your Google Drive inside **TB-303 Companion Backups**.
-
-### Run a backup manually
-
-1. Open **Menu...**
-2. Choose **Backup to Google Drive now**
-
-Once Google Drive is connected, saved libraries and saved patterns also sync automatically after changes. **Backup to Google Drive now** is the manual force-sync option.
-
-### What Google Drive backup includes
-
-Google Drive backup stores:
-
-- libraries
-- saved patterns
-- the last selected library
-- the last selected pattern
-
-### What Google Drive backup does not include until you save
-
-Unsaved edits in the current pattern are **not** part of the library backup yet. Save the pattern first if you want those changes included.
-
-## Using the app on phone or small screens
-
-303 util also works in a compact layout.
-
-On smaller screens:
-
-- use **Controls** to show or hide the sound section
-- use **Project** to show or hide the editor area
-- use **Full** for fullscreen mode when available
-- use the **VOICE** buttons and **Editor / Sheet** buttons to move between views quickly
+If Google Drive sync is configured, the app can back up saved libraries and patterns. Save your pattern first if you want the latest edits included in backup data.
 
 ## Recommended workflow
 
-For a clean and safe daily workflow:
-
-1. Create or choose a **Library**
-2. Create a **New Pattern**
-3. Enter notes and timing in **Editor**
-4. Shape the sound for each voice
-5. Set **Voices** and **Length**
-6. Press **Save**
-7. Export **JSON** or **PNG** if needed
-8. Use **Google Drive** backup for cloud protection
+1. Choose or create a **Library**.
+2. Create a **New Pattern**.
+3. Build the sequence in **Editor**.
+4. Shape the sound for each voice.
+5. Save regularly.
+6. Open **Sheet** and export the final chart.
+7. Export **JSON** or run backup if you want an extra copy.
 
 ## Practical tips
 
-- Save before switching patterns.
-- Save before importing another project.
-- Save before relying on Google Drive backup.
-- Remember that deleting a library deletes every pattern inside it.
-- Use separate libraries for different songs or performance sets.
-- Use multiple voices when you want layered acid lines in one saved project.
+- Save before switching libraries or patterns.
+- Use separate libraries for different songs, sets, or sessions.
+- Use **Sheet** view as the final check before sharing a pattern.
+- On compact layouts, **Controls** and **Mods** are your fastest way to switch between sound design and sequencing.
