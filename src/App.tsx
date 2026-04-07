@@ -82,7 +82,11 @@ type LineFx = {
   reverbSend: GainNode;
   reverb: ConvolverNode;
   reverbWet: GainNode;
+  lastDelayTime: number;
+  lastFeedbackAmount: number;
+  lastDelayMixAmount: number;
   lastDistortionAmount: number;
+  lastReverbAmount: number;
 };
 
 type UpdateDialogState =
@@ -391,11 +395,18 @@ const noteToMidi = (note: PitchName): number => {
 
 const noteToFrequency = (note: PitchName): number => 440 * 2 ** ((noteToMidi(note) - 69) / 12);
 
-const transposeNote = (freq: number, mode: Transpose) => {
-  if (mode === "down") return freq / 2;
-  if (mode === "up") return freq * 2;
-  return freq;
-};
+const NOTE_FREQUENCY_BY_PITCH = Object.fromEntries(PITCHES.map((pitch) => [pitch, noteToFrequency(pitch)])) as Record<PitchName, number>;
+
+const PLAYED_NOTE_FREQUENCY: Record<PitchName, Record<Transpose, number>> = Object.fromEntries(
+  PITCHES.map((pitch) => [
+    pitch,
+    {
+      none: NOTE_FREQUENCY_BY_PITCH[pitch],
+      down: NOTE_FREQUENCY_BY_PITCH[pitch] / 2,
+      up: NOTE_FREQUENCY_BY_PITCH[pitch] * 2,
+    },
+  ]),
+) as Record<PitchName, Record<Transpose, number>>;
 
 const makeDistortionCurve = (amount: number) => {
   const samples = 256;
@@ -646,9 +657,6 @@ const playablePatternLengthForMode = (patternLength: number, mode: PatternTiming
 const isStepDisabledForTimingMode = (stepIndex: number, patternLength: number, mode: PatternTimingMode): boolean =>
   stepIndex >= playablePatternLengthForMode(patternLength, mode);
 
-const playableStepIndicesForLength = (patternLength: number, mode: PatternTimingMode): number[] =>
-  Array.from({ length: playablePatternLengthForMode(patternLength, mode) }, (_, stepIndex) => stepIndex);
-
 const maxPatternLengthForMode = (_mode: PatternTimingMode): number => STEPS;
 
 const clampPatternLength = (length: number, mode: PatternTimingMode): number =>
@@ -680,6 +688,9 @@ const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): numbe
 const schedulerTickMs = (tempo: number): number => (60 / tempo) * (1000 / 12);
 
 const schedulerTicksPerStep = (mode: PatternTimingMode): number => (mode === "triplet" ? 4 : 3);
+
+const audioParamChanged = (previous: number, next: number, threshold = 0.002): boolean =>
+  !Number.isFinite(previous) || Math.abs(previous - next) > threshold;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -778,9 +789,12 @@ function App() {
   const timerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
+  const reverbBufferRef = useRef<AudioBuffer | null>(null);
   const lineFxRef = useRef<Array<LineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
+  const playheadRef = useRef(-1);
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
+  const selectedLineRef = useRef(selectedLine);
   const restoredPatternRef = useRef(false);
   const transposeOriginRef = useRef<{ lines: LineState[]; scaleRoot: PitchClass } | null>(null);
   const googleSyncEnabledRef = useRef(false);
@@ -788,6 +802,18 @@ function App() {
   const isApplyingDriveBackupRef = useRef(false);
   const lastDriveBackupSignatureRef = useRef("");
   const driveBackupTimerRef = useRef<number | null>(null);
+
+  const setPlayheadValue = (value: number) => {
+    if (playheadRef.current === value) return;
+    playheadRef.current = value;
+    setPlayhead(value);
+  };
+
+  const resetPlaybackState = () => {
+    setPlayheadValue(-1);
+    voiceStepRef.current.fill(0);
+    voiceTickRef.current.fill(0);
+  };
 
   const buildProjectSnapshot = (): ProjectData => ({
     version: 1,
@@ -864,6 +890,7 @@ function App() {
       master.connect(ctx.destination);
       audioRef.current = ctx;
       masterRef.current = master;
+      reverbBufferRef.current = makeImpulseResponse(ctx);
     }
     if (typeof lineIndex === "number" && !lineFxRef.current[lineIndex]) {
       const ctx = audioRef.current;
@@ -902,7 +929,15 @@ function App() {
       reverbWet.connect(master);
 
       distortion.oversample = "4x";
-      reverb.buffer = makeImpulseResponse(ctx);
+      reverb.buffer = reverbBufferRef.current;
+      dry.gain.value = 1;
+      delaySend.gain.value = 0;
+      delayWet.gain.value = 0;
+      feedback.gain.value = 0;
+      distSend.gain.value = 0;
+      distWet.gain.value = 0;
+      reverbSend.gain.value = 0;
+      reverbWet.gain.value = 0;
 
       lineFxRef.current[lineIndex] = {
         send,
@@ -917,7 +952,11 @@ function App() {
         reverbSend,
         reverb,
         reverbWet,
+        lastDelayTime: Number.NaN,
+        lastFeedbackAmount: Number.NaN,
+        lastDelayMixAmount: Number.NaN,
         lastDistortionAmount: -1,
+        lastReverbAmount: Number.NaN,
       };
     }
     return { ctx: audioRef.current };
@@ -1021,6 +1060,14 @@ function App() {
     setLines((prev) => prev.map((voice, vi) => (vi === selectedLine ? { ...voice, patternLength: nextLength } : voice)));
   };
 
+  const applyLivePatternLines = (nextLines: LineState[]) => {
+    linesRef.current = nextLines;
+    if (isPlaying) {
+      resetPlaybackState();
+    }
+    setLines(nextLines);
+  };
+
   const transposeCurrentPattern = (semitoneDelta: number) => {
     if (!transposeOriginRef.current) {
       transposeOriginRef.current = {
@@ -1045,7 +1092,7 @@ function App() {
       return;
     }
 
-    setLines(
+    applyLivePatternLines(
       transposedLines.map((line) => ({
         ...line,
         steps: line.steps as Step[],
@@ -1057,7 +1104,7 @@ function App() {
   const rollbackTransposedPattern = () => {
     const origin = transposeOriginRef.current;
     if (!origin) return;
-    setLines(origin.lines.map((line) => ({ ...line, steps: line.steps.map((step) => ({ ...step })), params: { ...line.params } })));
+    applyLivePatternLines(origin.lines.map((line) => ({ ...line, steps: line.steps.map((step) => ({ ...step })), params: { ...line.params } })));
     setScaleRoot(origin.scaleRoot);
     transposeOriginRef.current = null;
   };
@@ -1097,9 +1144,7 @@ function App() {
           : line,
       ),
     );
-    setPlayhead(-1);
-    voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
-    voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    resetPlaybackState();
   };
 
   const togglePatternTimingMode = () => {
@@ -1116,7 +1161,6 @@ function App() {
     const { ctx } = graph;
     const fx = lineFxRef.current[lineIndex];
     if (!fx) return;
-    if (ctx.state === "suspended") void ctx.resume();
 
     let noteSteps = 1;
     for (let s = stepIndex + 1; s < line.patternLength; s += 1) {
@@ -1130,7 +1174,7 @@ function App() {
     const filter = ctx.createBiquadFilter();
     const amp = ctx.createGain();
 
-    const freq = transposeNote(noteToFrequency(step.pitch), step.transpose);
+    const freq = PLAYED_NOTE_FREQUENCY[step.pitch][step.transpose];
     const accentBoost = step.accent ? line.params.accent : 1;
     const accentFilterBoost = step.accent ? 1.9 : 1;
     osc.type = line.params.waveform;
@@ -1145,7 +1189,7 @@ function App() {
       if (prevBase !== null) {
         const prevStep = line.steps[prevBase];
         if (prevStep.pitch) {
-          const prevFreq = transposeNote(noteToFrequency(prevStep.pitch), prevStep.transpose);
+          const prevFreq = PLAYED_NOTE_FREQUENCY[prevStep.pitch][prevStep.transpose];
           osc.frequency.setValueAtTime(prevFreq, now);
           osc.frequency.linearRampToValueAtTime(freq, now + Math.min(0.2, line.params.decay * 0.8 + 0.06));
         }
@@ -1168,21 +1212,35 @@ function App() {
     amp.connect(fx.send);
 
     const delayTime = line.params.delaySync ? delayTimeFromTempo(tempo, line.params.delaySubdivision) : line.params.delayTime;
-    fx.delay.delayTime.setValueAtTime(Math.min(1, Math.max(0.02, delayTime)), now);
-    fx.feedback.gain.setValueAtTime(Math.min(0.92, Math.max(0, line.params.delayFeedback)), now);
-    fx.dry.gain.setValueAtTime(1, now);
-    fx.delaySend.gain.setValueAtTime(Math.min(1, Math.max(0, line.params.delayMix)), now);
-    fx.delayWet.gain.setValueAtTime(Math.min(1, Math.max(0, line.params.delayMix)), now);
+    const nextDelayTime = Math.min(1, Math.max(0.02, delayTime));
+    if (audioParamChanged(fx.lastDelayTime, nextDelayTime, 0.0005)) {
+      fx.delay.delayTime.setValueAtTime(nextDelayTime, now);
+      fx.lastDelayTime = nextDelayTime;
+    }
+    const feedbackAmount = Math.min(0.92, Math.max(0, line.params.delayFeedback));
+    if (audioParamChanged(fx.lastFeedbackAmount, feedbackAmount)) {
+      fx.feedback.gain.setValueAtTime(feedbackAmount, now);
+      fx.lastFeedbackAmount = feedbackAmount;
+    }
+    const delayMixAmount = Math.min(1, Math.max(0, line.params.delayMix));
+    if (audioParamChanged(fx.lastDelayMixAmount, delayMixAmount)) {
+      fx.delaySend.gain.setValueAtTime(delayMixAmount, now);
+      fx.delayWet.gain.setValueAtTime(delayMixAmount, now);
+      fx.lastDelayMixAmount = delayMixAmount;
+    }
     const distortionAmount = Math.min(1, Math.max(0, line.params.distortion));
-    fx.distSend.gain.setValueAtTime(distortionAmount, now);
-    fx.distWet.gain.setValueAtTime(distortionAmount, now);
     if (Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
+      fx.distSend.gain.setValueAtTime(distortionAmount, now);
+      fx.distWet.gain.setValueAtTime(distortionAmount, now);
       fx.distortion.curve = makeDistortionCurve(distortionAmount);
       fx.lastDistortionAmount = distortionAmount;
     }
     const reverbAmount = Math.min(1, Math.max(0, line.params.reverb));
-    fx.reverbSend.gain.setValueAtTime(reverbAmount, now);
-    fx.reverbWet.gain.setValueAtTime(reverbAmount, now);
+    if (audioParamChanged(fx.lastReverbAmount, reverbAmount)) {
+      fx.reverbSend.gain.setValueAtTime(reverbAmount, now);
+      fx.reverbWet.gain.setValueAtTime(reverbAmount, now);
+      fx.lastReverbAmount = reverbAmount;
+    }
 
     osc.start(now);
     osc.stop(now + gate + 0.08);
@@ -1194,6 +1252,9 @@ function App() {
   useEffect(() => {
     lineCountRef.current = lineCount;
   }, [lineCount]);
+  useEffect(() => {
+    selectedLineRef.current = selectedLine;
+  }, [selectedLine]);
   useEffect(() => {
     setSelectedLine((prev) => Math.min(prev, lineCount - 1));
   }, [lineCount]);
@@ -1294,8 +1355,15 @@ function App() {
       timerRef.current = null;
     }
 
-    voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
-    voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    const graph = ensureAudio();
+    if (graph?.ctx.state === "suspended") {
+      void graph.ctx.resume();
+    }
+    for (let li = 0; li < lineCountRef.current; li += 1) {
+      ensureAudio(li);
+    }
+
+    resetPlaybackState();
     const stepMs = schedulerTickMs(tempo);
     const tick = () => {
       const linesNow = linesRef.current;
@@ -1307,15 +1375,15 @@ function App() {
           continue;
         }
         const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
-        const playableSteps = playableStepIndicesForLength(voiceLength, line.timingMode);
-        if (playableSteps.length === 0) {
+        const playableLength = playablePatternLengthForMode(voiceLength, line.timingMode);
+        if (playableLength <= 0) {
           voiceTickRef.current[li] += 1;
           continue;
         }
-        const stepIndex = playableSteps[voiceStepRef.current[li] % playableSteps.length];
+        const stepIndex = voiceStepRef.current[li] % playableLength;
         playStep(li, line, stepIndex, stepSecondsForTimingMode(tempo, line.timingMode));
-        if (li === selectedLine) {
-          setPlayhead(stepIndex);
+        if (li === selectedLineRef.current) {
+          setPlayheadValue(stepIndex);
         }
         voiceStepRef.current[li] += 1;
         voiceTickRef.current[li] += 1;
@@ -1329,7 +1397,7 @@ function App() {
         timerRef.current = null;
       }
     };
-  }, [isPlaying, tempo, selectedLine]);
+  }, [isPlaying, tempo]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2184,9 +2252,7 @@ function App() {
       const raw = typeof pattern.project === "string" ? JSON.parse(pattern.project) : pattern.project;
       const parsed = validateProjectData(raw);
       setIsPlaying(false);
-      setPlayhead(-1);
-      voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
-      voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
+      resetPlaybackState();
       setWorkspaceView("editor");
       setProgramName(parsed.programName);
       setLineCount(parsed.lineCount);
@@ -2356,9 +2422,7 @@ function App() {
       };
     });
     setIsPlaying(false);
-    setPlayhead(-1);
-    voiceStepRef.current = Array.from({ length: MAX_LINES }, () => 0);
-    voiceTickRef.current = Array.from({ length: MAX_LINES }, () => 0);
+    resetPlaybackState();
     setLines(resetLines);
   };
 
@@ -3118,7 +3182,7 @@ function App() {
 
                   <div className="knob-grid fx-knobs">
                     <div className="stack-control delay-sync-slot">
-                      <div className="knob-label">Sync</div>
+                      <div className="stack-control-spacer" aria-hidden="true" />
                       <div className="delay-sync-control">
                         <button
                           className={params.delaySync ? "selected" : ""}
@@ -3208,7 +3272,7 @@ function App() {
 
                   <div className="knob-grid fx-knobs">
                     <div className="stack-control delay-sync-slot">
-                      <div className="knob-label">Sync</div>
+                      <div className="stack-control-spacer" aria-hidden="true" />
                       <div className="delay-sync-control">
                         <button
                           className={params.delaySync ? "selected" : ""}
