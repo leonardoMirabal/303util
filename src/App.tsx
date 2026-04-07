@@ -2494,7 +2494,7 @@ function App() {
             <div className="mobile-header-summary">
               <div className="mobile-app-name">TB-303 util</div>
               <div className="mobile-summary-actions">
-                <button className={`play-button ${isPlaying ? "is-playing" : "is-stopped"}`} onClick={() => setIsPlaying((v) => !v)}>
+                <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                   {isPlaying ? "Stop" : "Play"}
                 </button>
                 <button
@@ -2538,7 +2538,7 @@ function App() {
               {currentPatternLabel}
             </div>
             <div className="mobile-summary-actions">
-              <button className={`play-button ${isPlaying ? "is-playing" : "is-stopped"}`} onClick={() => setIsPlaying((v) => !v)}>
+              <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                 {isPlaying ? "Stop" : "Play"}
               </button>
               <button type="button" className="mobile-menu-button" onClick={openNewPatternModal} aria-label="New pattern" title="New pattern">
