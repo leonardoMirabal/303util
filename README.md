@@ -1,6 +1,6 @@
 # 303 util User Manual
 
-**303 util** is a compact TB-303 pattern editor, multi-voice sketchpad, and sheet generator. The main workflow is simple: create or load a pattern, build it in the editor, shape the sound for each voice, and export a clean TB-303-style chart from **Sheet** view.
+**303 util** is a compact TB-303 pattern editor, multi-voice sketchpad, and sheet generator with **up to 32 steps per voice**. The main workflow is simple: create or load a pattern, build it in the editor, shape the sound for each voice, and export a clean TB-303-style chart from **Sheet** view.
 
 The original sound engine code is based on [thedjinn/js303](https://github.com/thedjinn/js303).
 
@@ -25,7 +25,7 @@ The main screen is built around a few controls you will use constantly:
 | --- | --- |
 | **TB-303 util button** | Opens the main menu and project options |
 | **Pattern name strip** | Shows the current `library > pattern` and opens the library/pattern picker |
-| **Length selector** | Sets the active voice length directly from the top bar |
+| **Length selector** | Sets the active voice length directly from the top bar, up to 32 steps |
 | **Play / + / Save** | Playback, new pattern, and save actions |
 | **Controls / Mods** | On compact layouts, show or hide the sound controls and step modifier lanes |
 | **Voice buttons** | Choose voice `1`, `2`, or `3` for editing |
@@ -130,7 +130,7 @@ You can change the active voice length in two places:
 - use the **length selector** in the top bar for quick changes
 - use **Len** inside the menu on compact layouts
 
-Length is stored per voice, so voice 1, 2, and 3 can use different step counts.
+Each voice supports **4 to 32 steps**, and length is stored per voice, so voice 1, 2, and 3 can use different step counts.
 
 ## Sound controls
 
@@ -166,7 +166,7 @@ On phones and small screens, use **Controls** to show or hide the knob section a
 Use the menu to reach the project options:
 
 - **Scale** and **Root** highlighting for guided note placement
-- **Len** for the active voice
+- **Len** for the active voice, with support for up to 32 steps
 - **Voices** to switch between 1, 2, or 3 voice projects
 - **Import** and **Export JSON**
 - **Export PNG**
@@ -194,7 +194,7 @@ The exported chart includes:
 - BPM
 - the number of voices exported
 - a separate block for each exported voice
-- step columns
+- step columns for the current pattern length, including longer 32-step patterns
 - **TIME**, **NOTE**, **DOWN**, **UP**, **ACC**, and **SLIDE** rows
 
 This makes the export practical as a real 303 reference sheet, not just a screenshot of the editor.
