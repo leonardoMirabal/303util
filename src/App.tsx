@@ -426,11 +426,20 @@ type KnobProps = {
   disabled?: boolean;
 };
 
+type MobileHeaderSection = "project" | "library" | "pattern" | "scale" | "utilities";
+
 function KnobControl({ label, min, max, step = 1, value, onChange, format, disabled = false }: KnobProps) {
   const normalized = (value - min) / (max - min);
   const angle = -135 + normalized * 270;
   const style: React.CSSProperties & { "--angle": string } = { "--angle": `${angle}deg` };
-  const pointerRef = useRef<{ pointerId: number; startX: number; startY: number; startValue: number; dragging: boolean } | null>(null);
+  const pointerRef = useRef<{
+    pointerId: number;
+    pointerType: string;
+    startX: number;
+    startY: number;
+    startValue: number;
+    dragging: boolean;
+  } | null>(null);
   const displayValue = format ? format(value) : value.toString();
 
   const clampValue = (next: number) => {
@@ -443,15 +452,16 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
     if (disabled) return;
     pointerRef.current = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       startX: event.clientX,
       startY: event.clientY,
       startValue: value,
       dragging: event.pointerType === "mouse",
     };
-    if (event.pointerType === "mouse") {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.setPointerCapture(event.pointerId);
-      event.preventDefault();
     }
+    event.preventDefault();
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -460,16 +470,16 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
     if (!pointer.dragging) {
       const deltaX = event.clientX - pointer.startX;
       const deltaY = pointer.startY - event.clientY;
-      if (Math.abs(deltaY) < 8 || Math.abs(deltaY) <= Math.abs(deltaX)) {
+      if (Math.abs(deltaY) < 6 || Math.abs(deltaY) <= Math.abs(deltaX)) {
         return;
       }
       pointer.dragging = true;
       pointer.startY = event.clientY;
       pointer.startValue = value;
-      event.currentTarget.setPointerCapture(event.pointerId);
     }
     const deltaY = pointer.startY - event.clientY;
-    const nextValue = pointer.startValue + (deltaY / 160) * (max - min);
+    const travel = pointer.pointerType === "touch" ? 220 : 160;
+    const nextValue = pointer.startValue + (deltaY / travel) * (max - min);
     event.preventDefault();
     onChange(clampValue(nextValue));
   };
@@ -654,7 +664,6 @@ function App() {
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
   const [selectedPatternId, setSelectedPatternId] = useState<string>(() => window.localStorage.getItem(LAST_PATTERN_ID_KEY) ?? "");
-  const [storageAction, setStorageAction] = useState("menu");
   const [isMobileViewport, setIsMobileViewport] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches,
   );
@@ -669,7 +678,8 @@ function App() {
         window.matchMedia("(orientation: landscape)").matches
       ),
   );
-  const [mobileModifiersOpen, setMobileModifiersOpen] = useState(true);
+  const [mobileHeaderSection, setMobileHeaderSection] = useState<MobileHeaderSection>("project");
+  const [mobileModifiersOpen, setMobileModifiersOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleSyncStatus, setGoogleSyncStatus] = useState<"idle" | "connecting" | "syncing" | "ready">("idle");
@@ -2049,9 +2059,8 @@ function App() {
     const orientationQuery = window.matchMedia("(orientation: landscape)");
     const syncLandscapeState = () => {
       const nextIsMobile = mobileQuery.matches;
-      const nextIsPhoneLandscape = nextIsMobile && orientationQuery.matches;
       setIsMobileViewport(nextIsMobile);
-      setMobileProjectOpen(!nextIsPhoneLandscape);
+      setMobileProjectOpen(false);
       setMobileControlsOpen(true);
     };
     syncLandscapeState();
@@ -2081,13 +2090,16 @@ function App() {
   const params = lines[selectedLine].params;
   const patternLength = clampPatternLength(lines[selectedLine].patternLength, selectedTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
+  const selectedSavedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
   const shouldShowRotateOverlay = false;
   const controlsToggleLabel = "Controls";
-  const projectToggleLabel = "Project";
   const modifiersToggleLabel = "Mods";
   const patternTimingLabel = selectedTimingMode === "normal" ? "♪" : "♪₃";
   const patternTimingAriaLabel = selectedTimingMode === "normal" ? "Regular note timing" : "Triplet note timing";
   const scaleEnabled = scalePresetId !== "off";
+  const currentLibraryLabel = libraries.find((library) => library.id === selectedLibraryId)?.name ?? "Library";
+  const currentPatternName = programName.trim() || selectedSavedPattern?.name || "Untitled";
+  const currentPatternLabel = `${currentLibraryLabel} > ${currentPatternName}`;
   const scalePitchClasses = scaleEnabled ? buildScalePitchClassSet(scaleRoot, scalePresetId) : null;
   const getPitchHighlightClass = (pitch: PitchName) => {
     if (!scalePitchClasses) return "";
@@ -2179,6 +2191,143 @@ function App() {
     </div>
   );
 
+  const toggleMobileHeaderSection = (section: MobileHeaderSection) => {
+    setMobileHeaderSection(section);
+    setMobileProjectOpen(true);
+  };
+
+  const renderMobileHeaderPanel = () => {
+    if (!mobileProjectOpen) return null;
+
+    if (mobileHeaderSection === "project") {
+      return (
+        <div className="mobile-group-panel" id="mobile-header-panel">
+          <label className="mobile-group-field">
+            Name
+            <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
+          </label>
+          <div className="mobile-group-actions">
+            <button type="button" onClick={resetPattern}>
+              Init
+            </button>
+            <button type="button" onClick={() => void runStorageAction("set-length")}>
+              Len {patternLength}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (mobileHeaderSection === "library") {
+      return (
+        <div className="mobile-group-panel" id="mobile-header-panel">
+          <label className="mobile-group-field">
+            Library
+            <select value={selectedLibraryId} onChange={(e) => setSelectedLibraryId(e.currentTarget.value)}>
+              {libraries.map((library) => (
+                <option key={library.id} value={library.id}>
+                  {library.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mobile-group-actions">
+            <button type="button" onClick={() => void runStorageAction("new-library")}>
+              New
+            </button>
+            <button type="button" onClick={() => void runStorageAction("delete-library")} disabled={selectedLibraryId === "default"}>
+              Delete
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (mobileHeaderSection === "pattern") {
+      return (
+        <div className="mobile-group-panel" id="mobile-header-panel">
+          <label className="mobile-group-field">
+            Pattern
+            <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
+              <option value="">Select...</option>
+              {visiblePatterns.map((pattern) => (
+                <option key={pattern.id} value={pattern.id}>
+                  {pattern.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mobile-group-actions">
+            <button type="button" onClick={() => void runStorageAction("new-pattern")}>
+              New
+            </button>
+            <button type="button" onClick={() => void runStorageAction("delete-pattern")} disabled={!selectedSavedPattern}>
+              Delete
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (mobileHeaderSection === "scale") {
+      return (
+        <div className="mobile-group-panel mobile-group-panel-dual" id="mobile-header-panel">
+          <label className="mobile-group-field">
+            Scale
+            <select value={scalePresetId} onChange={(e) => setScalePresetId(e.currentTarget.value)}>
+              <option value="off">Off</option>
+              {SCALE_PRESET_GROUPS.map(([group, presets]) => (
+                <optgroup key={group} label={group}>
+                  {presets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <label className="mobile-group-field">
+            Root
+            <select value={scaleRoot} onChange={(e) => setScaleRoot(e.currentTarget.value as PitchClass)} disabled={!scaleEnabled}>
+              {PITCH_CLASSES.map((pitchClass) => (
+                <option key={pitchClass} value={pitchClass}>
+                  {pitchClass}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mobile-group-panel" id="mobile-header-panel">
+        <div className="mobile-group-actions mobile-group-actions-grid">
+          <button type="button" onClick={() => void runStorageAction("set-voices")}>
+            Voices {lineCount}
+          </button>
+          <button type="button" onClick={isFullscreen ? exitFullscreen : enterFullscreen}>
+            {isFullscreen ? "Exit Full" : "Full"}
+          </button>
+          <button type="button" onClick={() => void runStorageAction("import-json")}>
+            Import
+          </button>
+          <button type="button" onClick={() => void runStorageAction("export-json")}>
+            Export JSON
+          </button>
+          <button type="button" onClick={() => void runStorageAction("export-png")}>
+            Export PNG
+          </button>
+          <button type="button" onClick={() => void runStorageAction(googleAccessToken ? "google-drive-backup-now" : "google-drive-connect")}>
+            {googleAccessToken ? "Backup" : "Drive"}
+          </button>
+        </div>
+        {googleSyncMessage ? <span className={`google-sync-status mobile-google-sync-status ${googleSyncStatus}`}>{googleSyncMessage}</span> : null}
+      </div>
+    );
+  };
+
   return (
     <main className="app">
       {isLibraryPickerOpen ? (
@@ -2214,153 +2363,142 @@ function App() {
           </div>
         </div>
       ) : null}
+      {mobileProjectOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setMobileProjectOpen(false)}>
+          <div
+            className="modal-card mobile-project-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-project-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="mobile-project-title">Project</h2>
+              <button type="button" onClick={() => setMobileProjectOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="mobile-header-groups" role="tablist" aria-label="Mobile project groups">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileHeaderSection === "project"}
+                className={mobileHeaderSection === "project" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("project")}
+                aria-controls="mobile-header-panel"
+              >
+                Project
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileHeaderSection === "library"}
+                className={mobileHeaderSection === "library" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("library")}
+                aria-controls="mobile-header-panel"
+              >
+                Library
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileHeaderSection === "pattern"}
+                className={mobileHeaderSection === "pattern" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("pattern")}
+                aria-controls="mobile-header-panel"
+              >
+                Pattern
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileHeaderSection === "scale"}
+                className={mobileHeaderSection === "scale" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("scale")}
+                aria-controls="mobile-header-panel"
+              >
+                Scale
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileHeaderSection === "utilities"}
+                className={mobileHeaderSection === "utilities" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("utilities")}
+                aria-controls="mobile-header-panel"
+              >
+                Settings
+              </button>
+            </div>
+            {renderMobileHeaderPanel()}
+          </div>
+        </div>
+      ) : null}
       {shouldShowRotateOverlay ? (
         <div className="rotate-overlay">
           <p>Rotate your phone to landscape to use 303 util.</p>
         </div>
       ) : null}
       <header className="panel header-panel">
-        <div className="header-row">
-          <h1>{isMobileViewport ? "TB-303" : "TB-303 util"}</h1>
-          <div className="header-primary-actions">
-            <button className="play-button" onClick={() => setIsPlaying((v) => !v)}>
-              {isPlaying ? "Stop" : "Play"}
-            </button>
-            <button onClick={resetPattern}>Init</button>
-            <button onClick={() => void saveSelectedPattern()}>Save</button>
-          </div>
-          <div className={`header-actions ${isMobileViewport && !mobileProjectOpen ? "mobile-collapsed" : ""}`}>
-            <div className="view-toggle header-timing-toggle" role="group" aria-label="Pattern timing">
-              <button
-                type="button"
-                className={selectedTimingMode === "triplet" ? "selected" : ""}
-                aria-label={patternTimingAriaLabel}
-                title={patternTimingAriaLabel}
-                onClick={togglePatternTimingMode}
-              >
-                {patternTimingLabel}
+        <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
+        {isMobileViewport ? (
+          <>
+            <div className="mobile-header-summary">
+              <div className="mobile-app-name">TB-303 util</div>
+              <div className="mobile-summary-actions">
+                <button className={`play-button ${isPlaying ? "is-playing" : "is-stopped"}`} onClick={() => setIsPlaying((v) => !v)}>
+                  {isPlaying ? "Stop" : "Play"}
+                </button>
+                <button onClick={() => void saveSelectedPattern()}>Save</button>
+                <button
+                  type="button"
+                  className={`mobile-controls-toggle ${mobileControlsOpen ? "selected" : ""}`}
+                  onClick={() => setMobileControlsOpen((open) => !open)}
+                  aria-expanded={mobileControlsOpen}
+                  aria-controls="mobile-hardware-controls"
+                >
+                  {controlsToggleLabel}
+                </button>
+                <button
+                  type="button"
+                  className={mobileModifiersOpen ? "mobile-modifiers-toggle selected" : "mobile-modifiers-toggle"}
+                  onClick={() => setMobileModifiersOpen((open) => !open)}
+                  aria-expanded={mobileModifiersOpen}
+                  aria-controls="mobile-modifier-controls"
+                >
+                  {modifiersToggleLabel}
+                </button>
+                <button type="button" className="mobile-menu-button" onClick={() => setMobileProjectOpen(true)} aria-label="Settings" title="Settings">
+                  ⚙
+                </button>
+                <div className="mobile-pattern-display" title={currentPatternLabel}>
+                  {currentPatternLabel}
+                </div>
+                {renderAuxControls("mobile-summary-aux")}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="mobile-header-summary desktop-header-summary">
+            <div className="mobile-app-name">TB-303 util</div>
+            <div className="mobile-pattern-display" title={currentPatternLabel}>
+              {currentPatternLabel}
+            </div>
+            <div className="mobile-summary-actions">
+              <button className={`play-button ${isPlaying ? "is-playing" : "is-stopped"}`} onClick={() => setIsPlaying((v) => !v)}>
+                {isPlaying ? "Stop" : "Play"}
+              </button>
+              <button onClick={() => void saveSelectedPattern()}>Save</button>
+              <button type="button" className="mobile-menu-button" onClick={() => setMobileProjectOpen(true)} aria-label="Settings" title="Settings">
+                ⚙
               </button>
             </div>
-            <label className="header-program header-program-name">
-              Program
-              <input type="text" value={programName} onChange={(e) => setProgramName(e.currentTarget.value)} />
-            </label>
-            <input ref={importRef} className="import-json-input" type="file" accept=".json,application/json" onChange={importProjectJson} />
-            <label className="header-program header-library-select">
-              Library
-              <select value={selectedLibraryId} onChange={(e) => setSelectedLibraryId(e.currentTarget.value)}>
-                {libraries.map((library) => (
-                  <option key={library.id} value={library.id}>
-                    {library.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="header-program header-pattern-select">
-              Pattern
-              <select value={selectedPatternId} onChange={(e) => setSelectedPatternId(e.currentTarget.value)}>
-                <option value="">Select...</option>
-                {visiblePatterns.map((pattern) => (
-                  <option key={pattern.id} value={pattern.id}>
-                    {pattern.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="header-program header-scale-root">
-              Root
-              <select value={scaleRoot} onChange={(e) => setScaleRoot(e.currentTarget.value as PitchClass)} disabled={!scaleEnabled}>
-                {PITCH_CLASSES.map((pitchClass) => (
-                  <option key={pitchClass} value={pitchClass}>
-                    {pitchClass}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="header-program header-scale-select">
-              Scale
-              <select value={scalePresetId} onChange={(e) => setScalePresetId(e.currentTarget.value)}>
-                <option value="off">Off</option>
-                {SCALE_PRESET_GROUPS.map(([group, presets]) => (
-                  <optgroup key={group} label={group}>
-                    {presets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-            <select
-              className="header-storage-menu"
-              value={storageAction}
-              onChange={(e) => {
-                const action = e.currentTarget.value;
-                setStorageAction("menu");
-                void runStorageAction(action);
-              }}
-            >
-              <option value="menu">Menu...</option>
-              <option value="set-voices">Voices</option>
-              <option value="set-length">Length</option>
-              <option value="set-library">Library</option>
-              <option value="export-json">Export JSON</option>
-              <option value="export-png">Export PNG</option>
-              <option value="import-json">Import JSON</option>
-              <option value="new-pattern">New Pattern</option>
-              <option value="save-pattern">Save Pattern</option>
-              <option value="delete-pattern">Delete Pattern</option>
-              <option value="new-library">New Library</option>
-              <option value="delete-library">Delete Library</option>
-              <option value="google-drive-connect">Connect Google Drive</option>
-              <option value="google-drive-backup-now">Backup to Google Drive now</option>
-            </select>
-            {googleSyncMessage ? <span className={`google-sync-status ${googleSyncStatus}`}>{googleSyncMessage}</span> : null}
           </div>
-        </div>
+        )}
       </header>
 
       <div className="workspace">
         <section className="panel hardware-panel">
-          <div className="mobile-hardware-bar">
-            <button type="button" className="mobile-fullscreen-toggle" onClick={enterFullscreen} disabled={isFullscreen}>
-              Full
-            </button>
-            <button
-              type="button"
-              className={mobileProjectOpen ? "mobile-project-toggle selected" : "mobile-project-toggle"}
-              onClick={() => setMobileProjectOpen((open) => !open)}
-              aria-expanded={mobileProjectOpen}
-            >
-              {projectToggleLabel}
-            </button>
-            <button
-              type="button"
-              className={`mobile-controls-toggle ${mobileControlsOpen ? "selected" : ""}`}
-              onClick={() => setMobileControlsOpen((open) => !open)}
-              aria-expanded={mobileControlsOpen}
-              aria-controls="mobile-hardware-controls"
-            >
-              {controlsToggleLabel}
-            </button>
-            {isFullscreen ? (
-              <button type="button" className="mobile-fullscreen-toggle" onClick={exitFullscreen}>
-                Exit Full
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={mobileModifiersOpen ? "mobile-modifiers-toggle selected" : "mobile-modifiers-toggle"}
-              onClick={() => setMobileModifiersOpen((open) => !open)}
-              aria-expanded={mobileModifiersOpen}
-              aria-controls="mobile-modifier-controls"
-            >
-              {modifiersToggleLabel}
-            </button>
-            {renderAuxControls("mobile-aux-controls")}
-          </div>
-
           <div className="hardware-scroll">
             <div
               id="mobile-hardware-controls"
@@ -2370,18 +2508,29 @@ function App() {
                 <>
                   <div className="leading-controls">
                     <div className="tempo-controls">
+                      <div className="tempo-button-stack" aria-label="Tempo modifiers">
+                        <button
+                          type="button"
+                          className={`tempo-action-button${selectedTimingMode === "triplet" ? " is-active" : ""}`}
+                          aria-label={patternTimingAriaLabel}
+                          title={patternTimingAriaLabel}
+                          onClick={togglePatternTimingMode}
+                        >
+                          {patternTimingLabel}
+                        </button>
+                        <button
+                          type="button"
+                          className={`tempo-action-button${halfTempoBase === null ? "" : " is-active"}`}
+                          onClick={toggleHalfTempo}
+                          aria-label="Toggle half tempo"
+                          aria-pressed={halfTempoBase !== null}
+                        >
+                          1/2
+                        </button>
+                      </div>
                       <div className="bpm-knob-slot">
                         <KnobControl label="BPM" min={MIN_TEMPO} max={MAX_TEMPO} value={tempo} onChange={setTempoFromKnob} />
                       </div>
-                      <button
-                        type="button"
-                        className={`tempo-action-button${halfTempoBase === null ? "" : " is-active"}`}
-                        onClick={toggleHalfTempo}
-                        aria-label="Toggle half tempo"
-                        aria-pressed={halfTempoBase !== null}
-                      >
-                        1/2
-                      </button>
                     </div>
                     <div className="volume-knob-slot">
                       <KnobControl label={synthLabels.volume} min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
@@ -2527,7 +2676,6 @@ function App() {
             className={`panel roll-panel workspace-pane ${workspaceView === "editor" ? "active" : "inactive"}`}
             style={{ "--step-count": patternLength } as React.CSSProperties}
           >
-            <h2>Pitch Editor</h2>
             <div className="roll-header">
               <div className="pitch-col">Pitch</div>
               {Array.from({ length: patternLength }, (_, s) => (

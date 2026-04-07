@@ -179,6 +179,70 @@ body {
   height: 38px;
 }
 
+.desktop-header-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.desktop-header-summary .mobile-app-name {
+  flex: 0 0 auto;
+  max-width: none;
+  height: 38px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d0a200;
+  border-radius: 6px;
+  background: #f0c43a;
+  color: #111315;
+  font-size: 0.9rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.desktop-header-summary .mobile-pattern-display {
+  flex: 1 1 auto;
+  min-width: 180px;
+  height: 38px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #66717d;
+  border-radius: 6px;
+  background: #2f353d;
+  color: #f2f5f8;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-header-summary .mobile-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.desktop-header-summary .mobile-summary-actions button {
+  width: auto;
+  min-width: 92px;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 0.78rem;
+}
+
+.desktop-header-summary .mobile-summary-actions .play-button {
+  min-width: 100px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .header-actions .header-timing-toggle button {
   width: 92px;
   min-width: 92px;
@@ -247,6 +311,26 @@ button.selected {
   border-color: #fafcff;
 }
 
+.play-button.is-stopped {
+  background: #7d2b2b;
+  border-color: #b65050;
+  color: #fff5f5;
+}
+
+.play-button.is-stopped:hover {
+  border-color: #d87979;
+}
+
+.play-button.is-playing {
+  background: #2f7d39;
+  border-color: #5ac56a;
+  color: #f3fff4;
+}
+
+.play-button.is-playing:hover {
+  border-color: #7bdf89;
+}
+
 .transport {
   display: flex;
   flex-wrap: wrap;
@@ -278,10 +362,12 @@ button.selected {
 .knob-groups {
   margin-top: 1px;
   display: grid;
-  grid-template-columns: auto 1px auto 1px auto 1px auto;
-  justify-content: start;
+  grid-template-columns: auto 1px auto 1px auto 1px minmax(0, 1fr);
+  justify-content: stretch;
   gap: 10px;
   align-items: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .hardware-scroll {
@@ -321,6 +407,10 @@ button.selected {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+}
+
+.tempo-button-stack {
+  display: none;
 }
 
 .tempo-action-button {
@@ -363,6 +453,15 @@ button.selected {
   margin-left: 0;
 }
 
+.desktop-aux-divider {
+  margin-left: auto;
+}
+
+.desktop-aux-controls {
+  justify-self: end;
+  margin-left: auto;
+}
+
 .aux-controls button,
 .view-toggle button {
   height: 32px;
@@ -388,8 +487,10 @@ button.selected {
 
 .delay-divider {
   width: 1px;
-  background: #8b939f;
+  margin-inline: 4px;
+  background: rgb(171 181 192 / 58%);
   align-self: stretch;
+  justify-self: center;
   min-height: 44px;
 }
 
@@ -436,7 +537,8 @@ button.selected {
   background: #3a4047;
   position: relative;
   box-shadow: none;
-  touch-action: pan-x;
+  touch-action: none;
+  user-select: none;
 }
 
 .knob:focus-visible {
@@ -460,10 +562,10 @@ button.selected {
 .knob-hit {
   appearance: none;
   position: absolute;
-  inset: -8px;
+  inset: -10px;
   margin: 0;
-  width: calc(100% + 16px);
-  height: calc(100% + 16px);
+  width: calc(100% + 20px);
+  height: calc(100% + 20px);
   border-radius: 50%;
   background: transparent;
   opacity: 0;
@@ -801,6 +903,9 @@ button.selected {
 
   .header-panel {
     flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
   }
 
   .workspace {
@@ -894,10 +999,188 @@ button.selected {
 
   .mobile-aux-controls {
     display: flex;
-    margin-left: 0;
+    margin-left: auto;
     gap: 2px;
     min-width: max-content;
     flex: 0 0 auto;
+  }
+
+  .mobile-header-summary {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 1px;
+    scrollbar-width: thin;
+    flex-wrap: nowrap;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-app-name {
+    flex: 0 0 auto;
+    max-width: 76px;
+    height: 24px;
+    padding: 0 6px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #d0a200;
+    border-radius: 6px;
+    background: #f0c43a;
+    color: #111315;
+    font-size: 0.62rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-pattern-display {
+    flex: 1 1 180px;
+    min-width: 120px;
+    height: 24px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #66717d;
+    border-radius: 6px;
+    background: #2f353d;
+    color: #f2f5f8;
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-summary-actions {
+    display: flex;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .mobile-summary-actions button {
+    width: auto;
+    min-width: 36px;
+    height: 24px;
+    padding: 0 5px;
+    font-size: 0.58rem;
+    white-space: nowrap;
+  }
+
+  .mobile-summary-actions .play-button {
+    min-width: 42px;
+  }
+
+  .mobile-menu-button {
+    min-width: 30px;
+    padding: 0 4px;
+    font-size: 0.86rem;
+    line-height: 1;
+  }
+
+  .mobile-summary-aux {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .mobile-summary-aux .voice-line-button {
+    min-width: 24px;
+    padding: 0 6px;
+  }
+
+  .mobile-summary-aux .view-toggle {
+    display: flex;
+    gap: 2px;
+  }
+
+  .mobile-summary-aux .view-toggle button {
+    min-width: 38px;
+    padding: 0 6px;
+    font-size: 0.58rem;
+  }
+
+  .mobile-header-groups {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .mobile-project-modal {
+    width: min(560px, 100%);
+    max-height: min(78dvh, 460px);
+  }
+
+  .mobile-header-groups button {
+    min-width: 0;
+    height: 24px;
+    padding: 0 4px;
+    font-size: 0.58rem;
+    white-space: nowrap;
+  }
+
+  .mobile-group-panel {
+    display: grid;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid #5b6672;
+    border-radius: 6px;
+    background: #434a53;
+  }
+
+  .mobile-group-panel-dual {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mobile-group-field {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    font-size: 0.58rem;
+    color: #eef2f6;
+  }
+
+  .mobile-group-field input,
+  .mobile-group-field select {
+    width: 100%;
+    min-width: 0;
+    height: 24px;
+  }
+
+  .mobile-group-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .mobile-group-actions-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .mobile-group-actions button {
+    min-width: 0;
+    height: 24px;
+    padding: 0 4px;
+    font-size: 0.58rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-google-sync-status {
+    display: block;
+    font-size: 0.55rem;
+    line-height: 1.2;
   }
 
   .panel {
@@ -1047,11 +1330,11 @@ button.selected {
   }
 
   .main-knobs {
-    grid-template-columns: 24px repeat(6, 52px);
+    grid-template-columns: 22px repeat(6, 48px);
   }
 
   .fx-knobs {
-    grid-template-columns: repeat(7, 52px);
+    grid-template-columns: repeat(7, 48px);
   }
 
   .wave-toggle button {
@@ -1062,38 +1345,52 @@ button.selected {
   }
 
   .volume-knob-slot {
-    width: 40px;
+    width: 36px;
   }
 
   .wave-knob-slot {
-    width: 24px;
+    width: 22px;
     justify-content: center;
   }
 
   .leading-controls {
-    gap: 4px;
+    gap: 3px;
   }
 
   .tempo-controls {
-    gap: 4px;
+    gap: 3px;
   }
 
-  .tempo-action-button {
-    min-width: 28px;
-    height: 24px;
-    padding: 0 6px;
-    font-size: 0.6rem;
+  .tempo-button-stack {
+    width: 32px;
+    display: grid;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+    flex: 0 0 auto;
+    align-self: end;
+  }
+
+  .tempo-controls > .tempo-action-button {
+    display: none;
+  }
+
+  .tempo-button-stack .tempo-action-button {
+    min-width: 32px;
+    height: 15px;
+    padding: 0 2px;
+    font-size: 0.48rem;
+    line-height: 1;
   }
 
   .knob {
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
   }
 
   .knob::before {
-    height: 8px;
-    top: 3px;
-    transform-origin: 50% 10px;
+    height: 11px;
+    top: 4px;
+    transform-origin: 50% 13px;
   }
 
   .delay-sync-control button,
@@ -1108,7 +1405,7 @@ button.selected {
   .knob-control {
     width: 100%;
     min-width: 0;
-    grid-template-rows: 12px 26px;
+    grid-template-rows: 12px 32px;
     align-items: start;
     overflow: hidden;
   }
@@ -1149,6 +1446,7 @@ button.selected {
   }
 
   .delay-divider {
+    margin-inline: 3px;
     min-height: 28px;
   }
 
