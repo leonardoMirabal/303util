@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
 import "./App.css";
@@ -84,6 +85,11 @@ type LineFx = {
   reverbWet: GainNode;
   lastDistortionAmount: number;
 };
+
+type UpdateDialogState =
+  | { kind: "up-to-date"; currentVersion: string }
+  | { kind: "available"; currentVersion: string; latestVersion: string; releaseUrl: string }
+  | { kind: "error"; currentVersion: string; message: string; releaseUrl: string };
 
 type ProjectData = {
   version: 1;
@@ -764,6 +770,7 @@ function App() {
   const [newPatternLibraryId, setNewPatternLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
   const [isNewLibraryModalOpen, setIsNewLibraryModalOpen] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState("");
+  const [updateDialog, setUpdateDialog] = useState<UpdateDialogState | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1870,8 +1877,27 @@ function App() {
     }
   };
 
-  const openLatestReleasePage = () => {
-    window.open(LATEST_RELEASE_URL, "_blank", "noopener,noreferrer");
+  const showUpdateDialog = (dialog: UpdateDialogState) => {
+    setMobileProjectOpen(false);
+    setUpdateDialog(dialog);
+  };
+
+  const openLatestReleasePage = async (url = LATEST_RELEASE_URL) => {
+    try {
+      if (isTauri()) {
+        await openUrl(url);
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not open the release page.";
+      showUpdateDialog({
+        kind: "error",
+        currentVersion: APP_VERSION,
+        message,
+        releaseUrl: url,
+      });
+    }
   };
 
   const checkForAppUpdate = async () => {
@@ -1888,22 +1914,34 @@ function App() {
       const latestTag = latestRelease.tag_name?.trim();
       const releaseUrl = latestRelease.html_url?.trim() || LATEST_RELEASE_URL;
       if (!latestTag) {
-        openLatestReleasePage();
+        showUpdateDialog({
+          kind: "error",
+          currentVersion: APP_VERSION,
+          message: "Could not determine the latest release version.",
+          releaseUrl,
+        });
         return;
       }
 
       if (compareVersionTags(latestTag, APP_VERSION) <= 0) {
-        window.alert(`You already have the latest version (${APP_VERSION}).`);
+        showUpdateDialog({ kind: "up-to-date", currentVersion: APP_VERSION });
         return;
       }
 
-      const shouldOpen = window.confirm(`Update available: ${latestTag}\nCurrent version: ${APP_VERSION}\n\nOpen the latest release page to download the APK?`);
-      if (!shouldOpen) return;
-      window.open(releaseUrl, "_blank", "noopener,noreferrer");
+      showUpdateDialog({
+        kind: "available",
+        currentVersion: APP_VERSION,
+        latestVersion: latestTag,
+        releaseUrl,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not check for updates.";
-      window.alert(`Could not check for updates: ${message}`);
-      openLatestReleasePage();
+      showUpdateDialog({
+        kind: "error",
+        currentVersion: APP_VERSION,
+        message,
+        releaseUrl: LATEST_RELEASE_URL,
+      });
     }
   };
 
@@ -2590,6 +2628,86 @@ function App() {
 
   return (
     <main className="app">
+      {updateDialog ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setUpdateDialog(null)}>
+          <div
+            className="modal-card mobile-project-modal update-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="update-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="update-dialog-title">Update</h2>
+              <button type="button" onClick={() => setUpdateDialog(null)}>
+                Close
+              </button>
+            </div>
+            <div className="mobile-group-panel update-dialog-body">
+              {updateDialog.kind === "available" ? (
+                <>
+                  <p className="update-dialog-message">A newer version is available.</p>
+                  <div className="update-dialog-meta">
+                    <span>Current</span>
+                    <strong>{updateDialog.currentVersion}</strong>
+                    <span>Latest</span>
+                    <strong>{updateDialog.latestVersion}</strong>
+                  </div>
+                  <p className="update-dialog-note">Download will open in your device&apos;s default browser.</p>
+                </>
+              ) : updateDialog.kind === "up-to-date" ? (
+                <p className="update-dialog-message">You already have the latest version ({updateDialog.currentVersion}).</p>
+              ) : (
+                <>
+                  <p className="update-dialog-message">Could not check for updates.</p>
+                  <p className="update-dialog-note">{updateDialog.message}</p>
+                </>
+              )}
+            </div>
+            <div className="modal-actions">
+              {updateDialog.kind === "available" ? (
+                <>
+                  <button type="button" onClick={() => setUpdateDialog(null)}>
+                    Later
+                  </button>
+                  <button
+                    type="button"
+                    className="selected"
+                    onClick={() => {
+                      const releaseUrl = updateDialog.releaseUrl;
+                      setUpdateDialog(null);
+                      void openLatestReleasePage(releaseUrl);
+                    }}
+                  >
+                    Download
+                  </button>
+                </>
+              ) : updateDialog.kind === "error" ? (
+                <>
+                  <button type="button" onClick={() => setUpdateDialog(null)}>
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="selected"
+                    onClick={() => {
+                      const releaseUrl = updateDialog.releaseUrl;
+                      setUpdateDialog(null);
+                      void openLatestReleasePage(releaseUrl);
+                    }}
+                  >
+                    Open releases
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="selected" onClick={() => setUpdateDialog(null)}>
+                  OK
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {isNewPatternModalOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setIsNewPatternModalOpen(false)}>
           <div

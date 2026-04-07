@@ -269,6 +269,44 @@ body {
   width: min(360px, 100%);
 }
 
+.update-modal {
+  width: min(560px, 100%);
+}
+
+.update-dialog-body {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.update-dialog-message,
+.update-dialog-note {
+  margin: 0;
+  color: #eef2f6;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.update-dialog-note {
+  color: #d6dee7;
+}
+
+.update-dialog-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  padding: 10px;
+  border: 1px solid #5b6672;
+  border-radius: 8px;
+  background: #434a53;
+  font-size: 0.76rem;
+  color: #dfe7ef;
+}
+
+.update-dialog-meta strong {
+  color: #f7fafc;
+}
+
 .modal-form {
   display: grid;
   gap: 10px;
