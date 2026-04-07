@@ -6,6 +6,7 @@ import "./App.css";
 const STEPS = 16;
 const MAX_LINES = 3;
 const DEFAULT_PATTERN_LENGTH = 16;
+const APP_ICON_SRC = `${import.meta.env.BASE_URL}icon_knob.svg`;
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
 const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const DELAY_SUBDIVISIONS = [
@@ -2646,7 +2647,7 @@ function App() {
         {isMobileViewport ? (
           <>
             <div className="mobile-header-summary">
-              <img className="app-corner-icon" src="/icon_knob.svg" alt="" aria-hidden="true" />
+              <img className="app-corner-icon" src={APP_ICON_SRC} alt="" aria-hidden="true" />
               <button type="button" className="mobile-app-name" onClick={() => setMobileProjectOpen(true)} aria-label="Open settings menu">
                 TB-303 util
               </button>
@@ -2706,7 +2707,7 @@ function App() {
           </>
         ) : (
           <div className="mobile-header-summary desktop-header-summary">
-            <img className="app-corner-icon" src="/icon_knob.svg" alt="" aria-hidden="true" />
+            <img className="app-corner-icon" src={APP_ICON_SRC} alt="" aria-hidden="true" />
             <button type="button" className="mobile-app-name" onClick={() => setMobileProjectOpen(true)} aria-label="Open settings menu">
               TB-303 util
             </button>
