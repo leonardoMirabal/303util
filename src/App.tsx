@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
 import "./App.css";
@@ -1885,7 +1884,7 @@ function App() {
   const openLatestReleasePage = async (url = LATEST_RELEASE_URL) => {
     try {
       if (isTauri()) {
-        await openUrl(url);
+        await invoke("open_external_url", { url });
         return;
       }
       window.open(url, "_blank", "noopener,noreferrer");

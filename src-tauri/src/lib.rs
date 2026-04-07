@@ -195,12 +195,19 @@ async fn desktop_google_drive_access_token(
         .map_err(|error| format!("Desktop Google auth task failed: {error}"))?
 }
 
+#[tauri::command]
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|error| format!("Failed to open system browser: {error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![desktop_google_drive_access_token])
+        .invoke_handler(tauri::generate_handler![desktop_google_drive_access_token, open_external_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
