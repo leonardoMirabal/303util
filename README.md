@@ -8,7 +8,7 @@ The original sound engine code is based on [thedjinn/js303](https://github.com/t
 
 ## Quick start
 
-1. Open the app and click the pattern name strip to choose a library and pattern, or click **+** to start a new one.
+1. Open the app and click the pattern name strip to choose a library and pattern, or click **New** to start a new one.
 2. Set the pattern length with the length selector in the top bar.
 3. In **Editor**, click notes into the pitch grid.
 4. Set each step in the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
@@ -26,7 +26,7 @@ The main screen is built around a few controls you will use constantly:
 | **TB-303 util button** | Opens the main menu and project options |
 | **Pattern name strip** | Shows the current `library > pattern` and opens the library/pattern picker |
 | **Length selector** | Sets the active voice length directly from the top bar, up to 32 steps |
-| **Play / + / Save** | Playback, new pattern, and save actions |
+| **Play / New / Init / Save** | Playback, create pattern, clear the current pattern, and save |
 | **Controls / Mods** | On compact layouts, show or hide the sound controls and step modifier lanes |
 | **Voice buttons** | Choose voice `1`, `2`, or `3` for editing |
 | **Editor / Sheet** | Switch between sequencing and printable export |
@@ -57,10 +57,18 @@ Click the name strip at the top of the app. On some layouts, the same actions ar
 
 Use either:
 
-- **+** in the top bar, or
+- **New** in the top bar, or
 - the **Pattern** section inside the menu
 
 New patterns open as blank projects so you can start sequencing right away.
+
+### Initialize the current pattern
+
+Click **Init** to clear the current pattern back to an empty state.
+
+- This removes notes and modifiers from all active voices.
+- It keeps the current voice lengths and timing mode.
+- The app asks for confirmation before resetting.
 
 ### Save a pattern
 
@@ -71,7 +79,7 @@ Click **Save**.
 
 ### Create, switch, or delete libraries
 
-Open the menu, then use the **Library** section to:
+Open the library and pattern picker from the name strip, then use it to:
 
 - choose a different library
 - create a new library
@@ -165,7 +173,8 @@ On phones and small screens, use **Controls** to show or hide the knob section a
 
 Use the menu to reach the project options:
 
-- **Scale** and **Root** highlighting for guided note placement
+- the **Scale** tab for **Scale** and **Root** highlighting
+- the **Pattern** tab for the project name and pattern length
 - **Len** for the active voice, with support for up to 32 steps
 - **Voices** to switch between 1, 2, or 3 voice projects
 - **Import** and **Export JSON**
