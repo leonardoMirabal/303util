@@ -706,8 +706,14 @@ button.selected {
 }
 
 .delay-sync-control {
+  display: grid;
+  align-content: center;
+  align-items: center;
+  justify-items: center;
   gap: 4px;
   min-width: 58px;
+  align-self: center;
+  grid-template-rows: repeat(2, minmax(0, auto));
 }
 
 .delay-sync-control button,
@@ -1621,7 +1627,7 @@ button.selected {
     grid-template-rows: repeat(2, minmax(0, 1fr));
     gap: 2px;
     flex: 0 0 auto;
-    align-self: end;
+    align-self: center;
   }
 
   .tempo-controls > .tempo-action-button {
@@ -1649,16 +1655,19 @@ button.selected {
 
   .delay-sync-control button,
   .delay-sync-control select {
-    height: 18px;
+    height: 15px;
     width: 40px;
     min-width: 40px;
-    padding: 0 1px;
-    font-size: 0.5rem;
+    padding: 0 2px;
+    font-size: 0.48rem;
+    line-height: 1;
   }
 
   .delay-sync-control {
-    align-self: end;
-    padding-top: 2px;
+    width: 40px;
+    align-self: center;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 2px;
   }
 
   .knob-control {

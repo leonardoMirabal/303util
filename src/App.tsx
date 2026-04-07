@@ -464,12 +464,14 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
+    event.currentTarget.focus({ preventScroll: true });
     event.preventDefault();
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const pointer = pointerRef.current;
     if (!pointer || pointer.pointerId !== event.pointerId || disabled) return;
+    event.preventDefault();
     if (!pointer.dragging) {
       const deltaX = event.clientX - pointer.startX;
       const deltaY = pointer.startY - event.clientY;
@@ -509,7 +511,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
   };
 
   return (
-    <label className="knob-control">
+    <div className="knob-control">
       <span className="knob-label">{label}</span>
       <div
         className="knob"
@@ -539,7 +541,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
         />
       </div>
       <span className="knob-value">{displayValue}</span>
-    </label>
+    </div>
   );
 }
 
@@ -2826,7 +2828,7 @@ function App() {
                   <div className="delay-divider" />
 
                   <div className="knob-grid fx-knobs">
-                    <label className="knob-control delay-sync-control">
+                    <div className="delay-sync-control">
                       <button
                         className={params.delaySync ? "selected" : ""}
                         aria-label={params.delaySync ? "Switch delay to free time" : "Switch delay to synced time"}
@@ -2846,7 +2848,7 @@ function App() {
                           </option>
                         ))}
                       </select>
-                    </label>
+                    </div>
                     <KnobControl
                       label={synthLabels.delayTime}
                       min={0.02}
@@ -2893,7 +2895,7 @@ function App() {
                   <div className="delay-divider" />
 
                   <div className="knob-grid fx-knobs">
-                    <label className="knob-control delay-sync-control">
+                    <div className="delay-sync-control">
                       <button
                         className={params.delaySync ? "selected" : ""}
                         onClick={() => updateParams({ delaySync: !params.delaySync })}
@@ -2911,7 +2913,7 @@ function App() {
                           </option>
                         ))}
                       </select>
-                    </label>
+                    </div>
                     <KnobControl
                       label="Delay Time"
                       min={0.02}
