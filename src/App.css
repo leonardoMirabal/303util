@@ -96,6 +96,34 @@ body {
   text-align: left;
 }
 
+.new-pattern-modal {
+  width: min(360px, 100%);
+}
+
+.modal-form {
+  display: grid;
+  gap: 10px;
+}
+
+.modal-form-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: #eef2f6;
+}
+
+.modal-form-field input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .rotate-overlay {
   display: none;
 }
