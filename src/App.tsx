@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
+import { delayTimeFromTempo, ensureAudioGraph, playScheduledStep, type AudioLineFx } from "./audioEngine";
 import "./App.css";
 
 const STEPS = 32;
@@ -67,26 +68,6 @@ type LineState = {
   patternLength: number;
   steps: Step[];
   params: VoiceParams;
-};
-
-type LineFx = {
-  send: GainNode;
-  dry: GainNode;
-  delaySend: GainNode;
-  delayWet: GainNode;
-  delay: DelayNode;
-  feedback: GainNode;
-  distSend: GainNode;
-  distortion: WaveShaperNode;
-  distWet: GainNode;
-  reverbSend: GainNode;
-  reverb: ConvolverNode;
-  reverbWet: GainNode;
-  lastDelayTime: number;
-  lastFeedbackAmount: number;
-  lastDelayMixAmount: number;
-  lastDistortionAmount: number;
-  lastReverbAmount: number;
 };
 
 type UpdateDialogState =
@@ -393,46 +374,6 @@ const noteToMidi = (note: PitchName): number => {
   return (octave + 1) * 12 + semitone;
 };
 
-const noteToFrequency = (note: PitchName): number => 440 * 2 ** ((noteToMidi(note) - 69) / 12);
-
-const NOTE_FREQUENCY_BY_PITCH = Object.fromEntries(PITCHES.map((pitch) => [pitch, noteToFrequency(pitch)])) as Record<PitchName, number>;
-
-const PLAYED_NOTE_FREQUENCY: Record<PitchName, Record<Transpose, number>> = Object.fromEntries(
-  PITCHES.map((pitch) => [
-    pitch,
-    {
-      none: NOTE_FREQUENCY_BY_PITCH[pitch],
-      down: NOTE_FREQUENCY_BY_PITCH[pitch] / 2,
-      up: NOTE_FREQUENCY_BY_PITCH[pitch] * 2,
-    },
-  ]),
-) as Record<PitchName, Record<Transpose, number>>;
-
-const makeDistortionCurve = (amount: number) => {
-  const samples = 256;
-  const curve = new Float32Array(samples);
-  const k = 1 + amount * 80;
-  for (let i = 0; i < samples; i += 1) {
-    const x = (i * 2) / (samples - 1) - 1;
-    curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
-  }
-  return curve;
-};
-
-const makeImpulseResponse = (ctx: AudioContext) => {
-  const duration = 1.2;
-  const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
-  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
-  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
-    const data = impulse.getChannelData(channel);
-    for (let i = 0; i < length; i += 1) {
-      const decay = (1 - i / length) ** 2.2;
-      data[i] = (Math.random() * 2 - 1) * decay;
-    }
-  }
-  return impulse;
-};
-
 const isPitchName = (value: unknown): value is PitchName => typeof value === "string" && (PITCHES as readonly string[]).includes(value);
 const isPitchClass = (value: unknown): value is PitchClass => typeof value === "string" && (PITCH_CLASSES as readonly string[]).includes(value);
 const isScalePresetId = (value: unknown): value is string => typeof value === "string" && value !== "off" && SCALE_PRESET_ID_SET.has(value);
@@ -596,11 +537,6 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
 const isDelaySubdivision = (value: unknown): value is DelaySubdivision =>
   typeof value === "string" && DELAY_SUBDIVISIONS.some((subdivision) => subdivision.value === value);
 
-const delayTimeFromTempo = (tempo: number, subdivision: DelaySubdivision): number => {
-  const beats = DELAY_SUBDIVISIONS.find((entry) => entry.value === subdivision)?.beats ?? 0.5;
-  return (60 / tempo) * beats;
-};
-
 const openLocalDb = (): Promise<IDBDatabase> =>
   new Promise((resolve, reject) => {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
@@ -684,13 +620,8 @@ const compareVersionTags = (left: string, right: string): number => {
 };
 
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
-
-const schedulerTickMs = (tempo: number): number => (60 / tempo) * (1000 / 12);
-
-const schedulerTicksPerStep = (mode: PatternTimingMode): number => (mode === "triplet" ? 4 : 3);
-
-const audioParamChanged = (previous: number, next: number, threshold = 0.002): boolean =>
-  !Number.isFinite(previous) || Math.abs(previous - next) > threshold;
+const SCHEDULER_LOOKAHEAD_SECONDS = 0.12;
+const SCHEDULER_INTERVAL_MS = 25;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -781,16 +712,18 @@ function App() {
   const [isNewLibraryModalOpen, setIsNewLibraryModalOpen] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState("");
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState | null>(null);
+  const [isInitDialogOpen, setIsInitDialogOpen] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
   const voiceStepRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const voiceTickRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
+  const nextStepTimeRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const timerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
   const reverbBufferRef = useRef<AudioBuffer | null>(null);
-  const lineFxRef = useRef<Array<LineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
+  const lineFxRef = useRef<Array<AudioLineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
   const playheadRef = useRef(-1);
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
@@ -802,6 +735,7 @@ function App() {
   const isApplyingDriveBackupRef = useRef(false);
   const lastDriveBackupSignatureRef = useRef("");
   const driveBackupTimerRef = useRef<number | null>(null);
+  const scheduledPlayheadTimeoutsRef = useRef<number[]>([]);
 
   const setPlayheadValue = (value: number) => {
     if (playheadRef.current === value) return;
@@ -809,10 +743,19 @@ function App() {
     setPlayhead(value);
   };
 
+  const clearScheduledPlayheadUpdates = () => {
+    for (const timeoutId of scheduledPlayheadTimeoutsRef.current) {
+      window.clearTimeout(timeoutId);
+    }
+    scheduledPlayheadTimeoutsRef.current = [];
+  };
+
   const resetPlaybackState = () => {
+    clearScheduledPlayheadUpdates();
     setPlayheadValue(-1);
     voiceStepRef.current.fill(0);
     voiceTickRef.current.fill(0);
+    nextStepTimeRef.current.fill(audioRef.current?.currentTime ?? 0);
   };
 
   const buildProjectSnapshot = (): ProjectData => ({
@@ -880,87 +823,7 @@ function App() {
     });
   };
 
-  const ensureAudio = (lineIndex?: number) => {
-    const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return null;
-    if (!audioRef.current || !masterRef.current) {
-      const ctx = new Ctx();
-      const master = ctx.createGain();
-      master.gain.value = 0.8;
-      master.connect(ctx.destination);
-      audioRef.current = ctx;
-      masterRef.current = master;
-      reverbBufferRef.current = makeImpulseResponse(ctx);
-    }
-    if (typeof lineIndex === "number" && !lineFxRef.current[lineIndex]) {
-      const ctx = audioRef.current;
-      const master = masterRef.current;
-      if (!ctx || !master) return null;
-      const send = ctx.createGain();
-      const dry = ctx.createGain();
-      const delaySend = ctx.createGain();
-      const delayWet = ctx.createGain();
-      const delay = ctx.createDelay(1.0);
-      const feedback = ctx.createGain();
-      const distSend = ctx.createGain();
-      const distortion = ctx.createWaveShaper();
-      const distWet = ctx.createGain();
-      const reverbSend = ctx.createGain();
-      const reverb = ctx.createConvolver();
-      const reverbWet = ctx.createGain();
-
-      send.connect(dry);
-      dry.connect(master);
-      send.connect(delaySend);
-      delaySend.connect(delay);
-      delay.connect(feedback);
-      feedback.connect(delay);
-      delay.connect(delayWet);
-      delayWet.connect(master);
-
-      send.connect(distSend);
-      distSend.connect(distortion);
-      distortion.connect(distWet);
-      distWet.connect(master);
-
-      send.connect(reverbSend);
-      reverbSend.connect(reverb);
-      reverb.connect(reverbWet);
-      reverbWet.connect(master);
-
-      distortion.oversample = "4x";
-      reverb.buffer = reverbBufferRef.current;
-      dry.gain.value = 1;
-      delaySend.gain.value = 0;
-      delayWet.gain.value = 0;
-      feedback.gain.value = 0;
-      distSend.gain.value = 0;
-      distWet.gain.value = 0;
-      reverbSend.gain.value = 0;
-      reverbWet.gain.value = 0;
-
-      lineFxRef.current[lineIndex] = {
-        send,
-        dry,
-        delaySend,
-        delayWet,
-        delay,
-        feedback,
-        distSend,
-        distortion,
-        distWet,
-        reverbSend,
-        reverb,
-        reverbWet,
-        lastDelayTime: Number.NaN,
-        lastFeedbackAmount: Number.NaN,
-        lastDelayMixAmount: Number.NaN,
-        lastDistortionAmount: -1,
-        lastReverbAmount: Number.NaN,
-      };
-    }
-    return { ctx: audioRef.current };
-  };
+  const ensureAudio = (lineIndex?: number) => ensureAudioGraph(audioRef, masterRef, reverbBufferRef, lineFxRef, lineIndex);
 
   const placePitch = (lineIndex: number, stepIndex: number, pitch: PitchName) => {
     const line = lines[lineIndex];
@@ -1152,98 +1015,20 @@ function App() {
     applyPatternTimingMode(nextMode);
   };
 
-  const playStep = (lineIndex: number, line: LineState, stepIndex: number, stepLenSeconds: number) => {
-    const step = line.steps[stepIndex];
-    if (step.timeMode !== "note" || !step.pitch) return;
-
-    const graph = ensureAudio(lineIndex);
-    if (!graph) return;
-    const { ctx } = graph;
-    const fx = lineFxRef.current[lineIndex];
-    if (!fx) return;
-
-    let noteSteps = 1;
-    for (let s = stepIndex + 1; s < line.patternLength; s += 1) {
-      if (isStepDisabledForTimingMode(s, line.patternLength, line.timingMode)) break;
-      if (line.steps[s].timeMode === "tie") noteSteps += 1;
-      else break;
-    }
-
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const filter = ctx.createBiquadFilter();
-    const amp = ctx.createGain();
-
-    const freq = PLAYED_NOTE_FREQUENCY[step.pitch][step.transpose];
-    const accentBoost = step.accent ? line.params.accent : 1;
-    const accentFilterBoost = step.accent ? 1.9 : 1;
-    osc.type = line.params.waveform;
-    osc.frequency.setValueAtTime(freq, now);
-
-    if (step.slide) {
-      let prevIdx = (stepIndex - 1 + line.patternLength) % line.patternLength;
-      while (prevIdx !== stepIndex && isStepDisabledForTimingMode(prevIdx, line.patternLength, line.timingMode)) {
-        prevIdx = (prevIdx - 1 + line.patternLength) % line.patternLength;
-      }
-      const prevBase = findBaseStep(line.steps, prevIdx);
-      if (prevBase !== null) {
-        const prevStep = line.steps[prevBase];
-        if (prevStep.pitch) {
-          const prevFreq = PLAYED_NOTE_FREQUENCY[prevStep.pitch][prevStep.transpose];
-          osc.frequency.setValueAtTime(prevFreq, now);
-          osc.frequency.linearRampToValueAtTime(freq, now + Math.min(0.2, line.params.decay * 0.8 + 0.06));
-        }
-      }
-    }
-
-    filter.type = "lowpass";
-    filter.Q.setValueAtTime(Math.min(30, line.params.resonance * accentFilterBoost), now);
-    filter.frequency.setValueAtTime(line.params.cutoff, now);
-    filter.frequency.exponentialRampToValueAtTime(Math.max(220, line.params.cutoff + line.params.envMod * accentFilterBoost), now + 0.02);
-    filter.frequency.exponentialRampToValueAtTime(Math.max(140, line.params.cutoff * 0.58), now + line.params.decay * noteSteps);
-
-    const gate = Math.max(0.12, noteSteps * stepLenSeconds * 0.92);
-    amp.gain.setValueAtTime(0.0001, now);
-    amp.gain.exponentialRampToValueAtTime(line.params.volume * accentBoost, now + 0.005);
-    amp.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(gate, line.params.decay * noteSteps));
-
-    osc.connect(filter);
-    filter.connect(amp);
-    amp.connect(fx.send);
-
-    const delayTime = line.params.delaySync ? delayTimeFromTempo(tempo, line.params.delaySubdivision) : line.params.delayTime;
-    const nextDelayTime = Math.min(1, Math.max(0.02, delayTime));
-    if (audioParamChanged(fx.lastDelayTime, nextDelayTime, 0.0005)) {
-      fx.delay.delayTime.setValueAtTime(nextDelayTime, now);
-      fx.lastDelayTime = nextDelayTime;
-    }
-    const feedbackAmount = Math.min(0.92, Math.max(0, line.params.delayFeedback));
-    if (audioParamChanged(fx.lastFeedbackAmount, feedbackAmount)) {
-      fx.feedback.gain.setValueAtTime(feedbackAmount, now);
-      fx.lastFeedbackAmount = feedbackAmount;
-    }
-    const delayMixAmount = Math.min(1, Math.max(0, line.params.delayMix));
-    if (audioParamChanged(fx.lastDelayMixAmount, delayMixAmount)) {
-      fx.delaySend.gain.setValueAtTime(delayMixAmount, now);
-      fx.delayWet.gain.setValueAtTime(delayMixAmount, now);
-      fx.lastDelayMixAmount = delayMixAmount;
-    }
-    const distortionAmount = Math.min(1, Math.max(0, line.params.distortion));
-    if (Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
-      fx.distSend.gain.setValueAtTime(distortionAmount, now);
-      fx.distWet.gain.setValueAtTime(distortionAmount, now);
-      fx.distortion.curve = makeDistortionCurve(distortionAmount);
-      fx.lastDistortionAmount = distortionAmount;
-    }
-    const reverbAmount = Math.min(1, Math.max(0, line.params.reverb));
-    if (audioParamChanged(fx.lastReverbAmount, reverbAmount)) {
-      fx.reverbSend.gain.setValueAtTime(reverbAmount, now);
-      fx.reverbWet.gain.setValueAtTime(reverbAmount, now);
-      fx.lastReverbAmount = reverbAmount;
-    }
-
-    osc.start(now);
-    osc.stop(now + gate + 0.08);
+  const playStep = (lineIndex: number, line: LineState, stepIndex: number, stepLenSeconds: number, startTime?: number) => {
+    playScheduledStep({
+      lineIndex,
+      line,
+      stepIndex,
+      stepLenSeconds,
+      startTime,
+      tempo,
+      audioRef,
+      masterRef,
+      reverbBufferRef,
+      lineFxRef,
+      findBaseStep,
+    });
   };
 
   useEffect(() => {
@@ -1351,7 +1136,7 @@ function App() {
   useEffect(() => {
     if (!isPlaying) return;
     if (timerRef.current !== null) {
-      window.clearInterval(timerRef.current);
+      window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
 
@@ -1364,38 +1149,58 @@ function App() {
     }
 
     resetPlaybackState();
-    const stepMs = schedulerTickMs(tempo);
+    const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
+    const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
+    const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
+      if (lineIndex !== selectedLineRef.current) return;
+      const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
+      if (delayMs <= 8) {
+        setPlayheadValue(stepIndex);
+        return;
+      }
+      const timeoutId = window.setTimeout(() => {
+        scheduledPlayheadTimeoutsRef.current = scheduledPlayheadTimeoutsRef.current.filter((id) => id !== timeoutId);
+        if (selectedLineRef.current === lineIndex) {
+          setPlayheadValue(stepIndex);
+        }
+      }, delayMs);
+      scheduledPlayheadTimeoutsRef.current.push(timeoutId);
+    };
     const tick = () => {
+      const ctx = audioRef.current;
+      if (!ctx) return;
+      const currentTime = ctx.currentTime;
+      const scheduleUntil = currentTime + SCHEDULER_LOOKAHEAD_SECONDS;
       const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
         const line = linesNow[li];
-        const ticksPerStep = schedulerTicksPerStep(line.timingMode);
-        if (voiceTickRef.current[li] % ticksPerStep !== 0) {
-          voiceTickRef.current[li] += 1;
-          continue;
-        }
+        const stepSeconds = line.timingMode === "triplet" ? tripletStepSeconds : normalStepSeconds;
         const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
         const playableLength = playablePatternLengthForMode(voiceLength, line.timingMode);
         if (playableLength <= 0) {
-          voiceTickRef.current[li] += 1;
+          nextStepTimeRef.current[li] = currentTime;
           continue;
         }
-        const stepIndex = voiceStepRef.current[li] % playableLength;
-        playStep(li, line, stepIndex, stepSecondsForTimingMode(tempo, line.timingMode));
-        if (li === selectedLineRef.current) {
-          setPlayheadValue(stepIndex);
+        let nextStepTime = Math.max(nextStepTimeRef.current[li], currentTime);
+        while (nextStepTime <= scheduleUntil) {
+          const stepIndex = voiceStepRef.current[li] % playableLength;
+          playStep(li, line, stepIndex, stepSeconds, nextStepTime);
+          schedulePlayheadUpdate(li, stepIndex, nextStepTime, currentTime);
+          voiceStepRef.current[li] += 1;
+          voiceTickRef.current[li] += 1;
+          nextStepTime += stepSeconds;
         }
-        voiceStepRef.current[li] += 1;
-        voiceTickRef.current[li] += 1;
+        nextStepTimeRef.current[li] = nextStepTime;
       }
+      timerRef.current = window.setTimeout(tick, SCHEDULER_INTERVAL_MS);
     };
     tick();
-    timerRef.current = window.setInterval(tick, stepMs);
     return () => {
       if (timerRef.current !== null) {
-        window.clearInterval(timerRef.current);
+        window.clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      clearScheduledPlayheadUpdates();
     };
   }, [isPlaying, tempo]);
 
@@ -1949,6 +1754,11 @@ function App() {
     setUpdateDialog(dialog);
   };
 
+  const showInitDialog = () => {
+    setMobileProjectOpen(false);
+    setIsInitDialogOpen(true);
+  };
+
   const openLatestReleasePage = async (url = LATEST_RELEASE_URL) => {
     try {
       if (isTauri()) {
@@ -2411,25 +2221,11 @@ function App() {
   };
 
   const resetPattern = () => {
-    const resetLines = Array.from({ length: MAX_LINES }, (_, lineIndex) => {
-      const currentLine = lines[lineIndex];
-      const emptyLine = makeLine();
-      if (!currentLine) return emptyLine;
-      return {
-        ...emptyLine,
-        timingMode: currentLine.timingMode,
-        patternLength: currentLine.patternLength,
-      };
-    });
-    setIsPlaying(false);
-    resetPlaybackState();
-    setLines(resetLines);
+    openUnsavedEmptyPattern(selectedLibraryId);
   };
 
   const initCurrentPattern = () => {
-    const ok = window.confirm(`Reset "${programName.trim() || "Untitled"}" to an empty pattern?`);
-    if (!ok) return;
-    resetPattern();
+    showInitDialog();
   };
 
   useEffect(() => {
@@ -2613,7 +2409,7 @@ function App() {
             </select>
           </label>
           <div className="mobile-group-actions">
-            <button type="button" onClick={resetPattern}>
+            <button type="button" onClick={initCurrentPattern}>
               Init
             </button>
             <button type="button" onClick={() => openNewPatternModal(selectedLibraryId)}>
@@ -2691,6 +2487,43 @@ function App() {
 
   return (
     <main className="app">
+      {isInitDialogOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setIsInitDialogOpen(false)}>
+          <div
+            className="modal-card mobile-project-modal update-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="init-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="init-dialog-title">Init pattern</h2>
+              <button type="button" onClick={() => setIsInitDialogOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="mobile-group-panel update-dialog-body">
+              <p className="update-dialog-message">Reset this pattern and wipe its current settings?</p>
+              <p className="update-dialog-note">This opens a fresh unsaved blank pattern in the current library.</p>
+            </div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setIsInitDialogOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="selected"
+                onClick={() => {
+                  setIsInitDialogOpen(false);
+                  resetPattern();
+                }}
+              >
+                Init
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {updateDialog ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setUpdateDialog(null)}>
           <div
@@ -3217,8 +3050,8 @@ function App() {
                     />
                     <KnobControl label={synthLabels.feedback} min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label={synthLabels.delayMix} min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label={synthLabels.distortion} min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label={synthLabels.reverb} min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                    <KnobControl label={synthLabels.distortion} min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <div className="stack-control pattern-transpose-control" aria-label="Pattern transpose controls">
                       <div className="pattern-transpose-stack">
                         <button type="button" className="tempo-action-button" aria-label="Transpose pattern up" title="Transpose pattern up" onClick={() => transposeCurrentPattern(1)}>
@@ -3305,8 +3138,8 @@ function App() {
                     />
                     <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                    <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     <div className="stack-control pattern-transpose-control" aria-label="Pattern transpose controls">
                       <div className="pattern-transpose-stack">
                         <button type="button" className="tempo-action-button" aria-label="Transpose pattern up" title="Transpose pattern up" onClick={() => transposeCurrentPattern(1)}>
