@@ -686,6 +686,16 @@ button.selected {
   border-color: #fafcff;
 }
 
+.save-button-dirty {
+  background: #2f7d39;
+  border-color: #5ac56a;
+  color: #f3fff4;
+}
+
+.save-button-dirty:hover {
+  border-color: #7bdf89;
+}
+
 .play-button.is-stopped {
   background: #7d2b2b;
   border-color: #b65050;
@@ -1185,6 +1195,12 @@ button.selected {
   font-size: 0.48rem;
 }
 
+.lane-time button.lane-time-tie.selected {
+  background: #7f6fd9;
+  border-color: #d9d1ff;
+  color: #100d22;
+}
+
 .cell {
   min-height: 12px;
   border: 1px solid #252a31;
@@ -1223,6 +1239,21 @@ button.selected {
   background: #df6262;
   border-color: #ffd0d0;
   color: #220808;
+}
+
+.cell.note.note-span {
+  position: relative;
+  z-index: 1;
+  justify-self: stretch;
+  box-shadow: inset -3px 0 0 #8a7ae4;
+}
+
+.cell.note.note-span.scale-member {
+  box-shadow: inset -3px 0 0 #6c61c9;
+}
+
+.cell.note.note-span.scale-root {
+  box-shadow: inset -3px 0 0 #b8435b;
 }
 
 .preview-actions {
@@ -1917,15 +1948,15 @@ button.selected {
   .delay-sync-control button,
   .delay-sync-control select {
     height: 15px;
-    width: 36px;
-    min-width: 36px;
-    padding: 0 2px;
-    font-size: 0.48rem;
+    width: 44px;
+    min-width: 44px;
+    padding: 0 3px;
+    font-size: 0.54rem;
     line-height: 1;
   }
 
   .delay-sync-control {
-    width: 36px;
+    width: 44px;
     align-self: center;
     grid-template-rows: repeat(2, minmax(0, 1fr));
     gap: 2px;

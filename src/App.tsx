@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
-import { delayTimeFromTempo, ensureAudioGraph, playScheduledStep, type AudioLineFx } from "./audioEngine";
+import { delayTimeFromTempo, ensureAudioGraph, playScheduledStep, syncLineAudioState, type AudioLineFx } from "./audioEngine";
 import "./App.css";
 
 const STEPS = 32;
@@ -663,6 +663,16 @@ const findBaseStep = (steps: Step[], step: number): number | null => {
   return null;
 };
 
+const getTieSpanLength = (steps: Step[], step: number, patternLength: number): number => {
+  if (steps[step].timeMode !== "note" || !steps[step].pitch) return 1;
+  let span = 1;
+  for (let s = step + 1; s < patternLength; s += 1) {
+    if (steps[s].timeMode !== "tie" || findBaseStep(steps, s) !== step) break;
+    span += 1;
+  }
+  return span;
+};
+
 const mapLegacyPatternLength = (raw: unknown): number => {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_PATTERN_LENGTH;
   return Math.max(MIN_PATTERN_LENGTH, Math.min(STEPS, raw));
@@ -715,12 +725,20 @@ const loadFxVisibilitySettings = (): FxVisibilitySettings => {
   if (!raw) return DEFAULT_FX_VISIBILITY_SETTINGS;
   try {
     const parsed = JSON.parse(raw) as Partial<FxVisibilitySettings>;
-    return normalizeFxVisibilitySettings({
+    const normalized = normalizeFxVisibilitySettings({
       delay: parsed.delay !== false,
       reverb: parsed.reverb !== false,
       overdrive: parsed.overdrive !== false,
       distortion: parsed.distortion === true,
     });
+    if (normalized.distortion && !normalized.overdrive) {
+      return {
+        ...normalized,
+        overdrive: true,
+        distortion: false,
+      };
+    }
+    return normalized;
   } catch {
     return DEFAULT_FX_VISIBILITY_SETTINGS;
   }
@@ -1156,6 +1174,23 @@ function App() {
     linesRef.current = lines;
   }, [lines]);
   useEffect(() => {
+    const ctx = audioRef.current;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    for (let li = 0; li < lineCount; li += 1) {
+      syncLineAudioState({
+        lineIndex: li,
+        params: applyFxVisibilityToParams(lines[li].params),
+        tempo,
+        audioRef,
+        masterRef,
+        reverbBufferRef,
+        lineFxRef,
+        atTime: now,
+      });
+    }
+  }, [fxVisibility, lineCount, lines, tempo]);
+  useEffect(() => {
     lineCountRef.current = lineCount;
   }, [lineCount]);
   useEffect(() => {
@@ -1189,7 +1224,17 @@ function App() {
   useEffect(() => {
     if (!selectedPatternId) return;
     const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
-    if (selectedPattern) loadPattern(selectedPattern);
+    if (!selectedPattern) return;
+    try {
+      const raw = typeof selectedPattern.project === "string" ? JSON.parse(selectedPattern.project) : selectedPattern.project;
+      const parsed = validateProjectData(raw);
+      if (JSON.stringify(parsed) === JSON.stringify(buildProjectSnapshot())) {
+        return;
+      }
+    } catch {
+      // Fall through and let loadPattern surface any stored-pattern issues.
+    }
+    loadPattern(selectedPattern);
   }, [selectedPatternId, selectedLibraryId, patterns]);
   useEffect(() => {
     window.localStorage.setItem(LAST_LIBRARY_ID_KEY, selectedLibraryId);
@@ -3320,7 +3365,7 @@ function App() {
                 <button type="button" className="mobile-menu-button" onClick={initCurrentPattern} aria-label="Init pattern" title="Init pattern">
                   Init
                 </button>
-                <button type="button" className="mobile-menu-button" onClick={() => void saveSelectedPattern()}>
+                <button type="button" className={`mobile-menu-button${hasUnsavedChanges ? " save-button-dirty" : ""}`} onClick={() => void saveSelectedPattern()}>
                   Save
                 </button>
                 {renderAuxControls("mobile-summary-aux")}
@@ -3382,7 +3427,7 @@ function App() {
               <button type="button" className="mobile-menu-button" onClick={initCurrentPattern} aria-label="Init pattern" title="Init pattern">
                 Init
               </button>
-              <button type="button" className="mobile-menu-button" onClick={() => void saveSelectedPattern()}>
+              <button type="button" className={`mobile-menu-button${hasUnsavedChanges ? " save-button-dirty" : ""}`} onClick={() => void saveSelectedPattern()}>
                 Save
               </button>
             </div>
@@ -3426,7 +3471,7 @@ function App() {
                       </div>
                     </div>
                     <div className="volume-knob-slot">
-                      <KnobControl label={synthLabels.volume} min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                      <KnobControl label={synthLabels.volume} min={0} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     </div>
                   </div>
 
@@ -3519,7 +3564,7 @@ function App() {
                       </div>
                     </div>
                     <div className="volume-knob-slot desktop-volume-knob-slot">
-                      <KnobControl label="Volume" min={0.05} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                      <KnobControl label="Volume" min={0} max={0.8} step={0.01} value={params.volume} onChange={(v) => updateParams({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} />
                     </div>
                   </div>
 
@@ -3619,13 +3664,13 @@ function App() {
             <div className="roll-header">
               <div className="pitch-col">Pitch</div>
               {Array.from({ length: patternLength }, (_, s) => (
-              <button
-                key={s}
-                className={`step-head ${playhead === s ? "playhead" : ""} ${isStepDisabledForTimingMode(s, patternLength, selectedTimingMode) ? "disabled" : ""}`.trim()}
-              >
-                {s + 1}
-              </button>
-            ))}
+                <button
+                  key={s}
+                  className={`step-head ${playhead === s ? "playhead" : ""} ${isStepDisabledForTimingMode(s, patternLength, selectedTimingMode) ? "disabled" : ""}`.trim()}
+                >
+                  {s + 1}
+                </button>
+              ))}
             </div>
 
             <div className="roll-grid">
@@ -3636,12 +3681,19 @@ function App() {
                     const step = lines[selectedLine].steps[s];
                     const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                     const isNote = step.timeMode === "note" && step.pitch === pitch;
+                    const tieBaseStep = step.timeMode === "tie" ? findBaseStep(lines[selectedLine].steps, s) : null;
+                    const isTieContinuation = tieBaseStep !== null && lines[selectedLine].steps[tieBaseStep]?.pitch === pitch;
+                    if (isTieContinuation) {
+                      return null;
+                    }
+                    const tieSpanLength = isNote ? getTieSpanLength(lines[selectedLine].steps, s, patternLength) : 1;
                     return (
                       <button
                         key={`${pitch}-${s}`}
-                        className={`cell ${isNote ? "note" : ""} ${isDisabled ? "disabled" : ""} ${getPitchHighlightClass(pitch)}`.trim()}
+                        className={`cell ${isNote ? "note" : ""} ${tieSpanLength > 1 ? "note-span" : ""} ${isDisabled ? "disabled" : ""} ${getPitchHighlightClass(pitch)}`.trim()}
                         onClick={() => placePitch(selectedLine, s, pitch)}
                         disabled={isDisabled}
+                        style={tieSpanLength > 1 ? ({ gridColumn: `span ${tieSpanLength}` } as React.CSSProperties) : undefined}
                       >
                         {isNote ? "■" : ""}
                       </button>
@@ -3714,13 +3766,13 @@ function App() {
                   const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   return (
                     <div key={`time-${s}`} className={`lane-time ${isDisabled ? "disabled" : ""}`.trim()}>
-                      <button className={step.timeMode === "note" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "note")} disabled={isDisabled}>
+                      <button className={step.timeMode === "note" ? "selected lane-time-note" : "lane-time-note"} onClick={() => setStepMode(selectedLine, s, "note")} disabled={isDisabled}>
                         N
                       </button>
-                      <button className={step.timeMode === "tie" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "tie")} disabled={isDisabled}>
+                      <button className={step.timeMode === "tie" ? "selected lane-time-tie" : "lane-time-tie"} onClick={() => setStepMode(selectedLine, s, "tie")} disabled={isDisabled}>
                         T
                       </button>
-                      <button className={step.timeMode === "rest" ? "selected" : ""} onClick={() => setStepMode(selectedLine, s, "rest")} disabled={isDisabled}>
+                      <button className={step.timeMode === "rest" ? "selected lane-time-rest" : "lane-time-rest"} onClick={() => setStepMode(selectedLine, s, "rest")} disabled={isDisabled}>
                         R
                       </button>
                     </div>
