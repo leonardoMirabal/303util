@@ -164,16 +164,34 @@ The control strip always edits the **currently selected voice**.
 - **Delay Time / TIME**
 - **Feedback / FDBK**
 - **Mix**
+- **Tone**
+- **Overdrive / DRV**
 - **Distortion / DIST**
 - **Reverb / REV**
 
 On phones and small screens, use **Controls** to show or hide the knob section and **Mods** to show or hide the sequencing lanes.
+
+### FX menu sections
+
+Open the menu and switch to the **FX** tab when you want deeper effect editing.
+
+![FX menu sections](docs/screenshots/fx-menu.png)
+
+The FX tab is split into four effect sections:
+
+- **Delay**: sync/free mode, subdivision, delay time, feedback, delay mix, and tone
+- **Reverb**: amount, tail, pre-delay, and tone
+- **Overdrive**: drive amount and tone
+- **Distortion**: distortion amount and tone
+
+Each effect has its own **Enabled** toggle. The app allows up to **3 enabled effects at once**, so if three are already active, the next effect button shows **3 Max** until you disable one.
 
 ## Scales and project settings
 
 Use the menu to reach the project options:
 
 - the **Scale** tab for **Scale** and **Root** highlighting
+- the **FX** tab for detailed effect sections and enable/disable control
 - the **Pattern** tab for the project name and pattern length
 - **Len** for the active voice, with support for up to 32 steps
 - **Voices** to switch between 1, 2, or 3 voice projects
