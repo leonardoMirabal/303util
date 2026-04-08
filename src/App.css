@@ -205,6 +205,10 @@ body {
   gap: 8px;
 }
 
+.fx-menu-inline-controls.fx-menu-inline-controls-single {
+  grid-template-columns: minmax(90px, 120px);
+}
+
 .fx-menu-inline-controls button,
 .fx-menu-inline-controls select {
   width: 100%;
@@ -566,6 +570,37 @@ body {
   font-size: 0.8rem;
 }
 
+.bpm-visualizer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid #49525d;
+  border-radius: 6px;
+  background: #272d34;
+  flex: 0 0 auto;
+}
+
+.bpm-visualizer span {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #f2f5f8;
+}
+
+.desktop-bpm-visualizer {
+  width: 48px;
+  height: 38px;
+  padding: 0 8px;
+}
+
+.desktop-bpm-visualizer span {
+  font-size: 0.84rem;
+}
+
 .header-length-select {
   position: relative;
   display: inline-flex;
@@ -872,10 +907,10 @@ button.selected {
 }
 
 .wave-toggle button {
-  min-width: 22px;
+  min-width: 18px;
   height: 24px;
-  padding: 0 3px;
-  font-size: 0.62rem;
+  padding: 0 2px;
+  font-size: 0.58rem;
   line-height: 1;
 }
 
@@ -940,7 +975,7 @@ button.selected {
   gap: 1px;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .delay-sync-control {
@@ -951,7 +986,7 @@ button.selected {
   gap: 4px;
   min-width: 58px;
   align-self: center;
-  grid-template-rows: repeat(2, minmax(0, auto));
+  grid-template-rows: minmax(0, auto);
 }
 
 .delay-sync-control button,
@@ -1013,6 +1048,10 @@ button.selected {
   transform: translateX(-50%) rotate(var(--angle));
 }
 
+.knob.showing-value::before {
+  opacity: 0.28;
+}
+
 .knob-hit {
   appearance: none;
   position: absolute;
@@ -1029,7 +1068,29 @@ button.selected {
 }
 
 .knob-value {
-  display: none;
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgb(18 22 27 / 92%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #f7fbff;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.knob-control.showing-value .knob-label {
+  opacity: 0.18;
+}
+
+.knob.showing-value .knob-value {
+  opacity: 1;
 }
 
 .workspace {
@@ -1566,6 +1627,16 @@ button.selected {
     min-width: 42px;
   }
 
+  .bpm-visualizer {
+    width: 28px;
+    height: 24px;
+    padding: 0 3px;
+  }
+
+  .bpm-visualizer span {
+    font-size: 0.56rem;
+  }
+
   .mobile-menu-button {
     min-width: 30px;
     padding: 0 4px;
@@ -1858,7 +1929,7 @@ button.selected {
   }
 
   .main-knobs {
-    grid-template-columns: 20px repeat(6, 44px);
+    grid-template-columns: 30px repeat(6, 44px);
   }
 
   .fx-knobs {
@@ -1867,10 +1938,11 @@ button.selected {
   }
 
   .wave-toggle button {
-    min-width: 18px;
-    height: 20px;
+    min-width: 30px;
+    height: 22px;
     padding: 0 2px;
-    font-size: 0.52rem;
+    font-size: 0.54rem;
+    line-height: 1;
   }
 
   .volume-knob-slot {
@@ -1878,8 +1950,10 @@ button.selected {
   }
 
   .wave-knob-slot {
-    width: 20px;
+    width: 30px;
     justify-content: center;
+    align-self: stretch;
+    padding-inline: 2px 4px;
   }
 
   .leading-controls {
@@ -1888,6 +1962,11 @@ button.selected {
 
   .tempo-controls {
     gap: 3px;
+  }
+
+  .delay-divider {
+    margin-inline: 9px;
+    min-height: 36px;
   }
 
   .tempo-button-stack {
@@ -1913,6 +1992,16 @@ button.selected {
 
   .stack-control {
     grid-template-rows: 11px minmax(0, 30px);
+  }
+
+  .stack-control.delay-sync-slot {
+    grid-template-rows: minmax(0, 1fr);
+    align-items: center;
+    padding-inline: 4px 2px;
+  }
+
+  .delay-sync-slot .stack-control-spacer {
+    display: none;
   }
 
   .pattern-transpose-control {
@@ -1945,7 +2034,6 @@ button.selected {
     transform-origin: 50% 12px;
   }
 
-  .delay-sync-control button,
   .delay-sync-control select {
     height: 15px;
     width: 44px;
@@ -1956,10 +2044,11 @@ button.selected {
   }
 
   .delay-sync-control {
-    width: 44px;
+    width: 34px;
     align-self: center;
-    grid-template-rows: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
     gap: 2px;
+    justify-items: stretch;
   }
 
   .knob-control {
@@ -1967,7 +2056,7 @@ button.selected {
     min-width: 0;
     grid-template-rows: 11px 30px;
     align-items: start;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .delay-sync-control {
@@ -1975,6 +2064,11 @@ button.selected {
   }
 
   .delay-sync-control button {
+    width: 34px;
+    min-width: 34px;
+    height: 22px;
+    padding: 0 2px;
+    font-size: 0.54rem;
     justify-self: center;
   }
 

@@ -110,8 +110,8 @@ const noteToMidi = (note: string): number => {
 const noteToFrequency = (note: string): number => 440 * 2 ** ((noteToMidi(note) - 69) / 12);
 
 const NOTE_FREQUENCY_BY_PITCH = Object.fromEntries(PITCHES.map((pitch) => [pitch, noteToFrequency(pitch)])) as Record<string, number>;
-const MASTER_OUTPUT_GAIN = 0.72;
-const LINE_OUTPUT_HEADROOM_GAIN = 0.72;
+const MASTER_OUTPUT_GAIN = 0.68;
+const LINE_OUTPUT_HEADROOM_GAIN = 0.62;
 
 const PLAYED_NOTE_FREQUENCY: Record<string, Record<EngineTranspose, number>> = Object.fromEntries(
   PITCHES.map((pitch) => [
@@ -200,6 +200,21 @@ const playablePatternLengthForMode = (patternLength: number, mode: EnginePattern
 const audioParamChanged = (previous: number, next: number, threshold = 0.002): boolean =>
   !Number.isFinite(previous) || Math.abs(previous - next) > threshold;
 
+const holdAudioParam = (param: AudioParam, now: number) => {
+  const paramWithHold = param as AudioParam & Partial<{ cancelAndHoldAtTime: (time: number) => void }>;
+  if (typeof paramWithHold.cancelAndHoldAtTime === "function") {
+    paramWithHold.cancelAndHoldAtTime(now);
+    return;
+  }
+  param.cancelScheduledValues(now);
+  param.setValueAtTime(param.value, now);
+};
+
+const smoothAudioParam = (param: AudioParam, next: number, now: number, rampSeconds = 0.03) => {
+  holdAudioParam(param, now);
+  param.linearRampToValueAtTime(next, now + rampSeconds);
+};
+
 export const ensureAudioGraph = (
   audioRef: RefLike<AudioContext | null>,
   masterRef: RefLike<GainNode | null>,
@@ -214,11 +229,11 @@ export const ensureAudioGraph = (
     const master = ctx.createGain();
     const limiter = ctx.createDynamicsCompressor();
     master.gain.value = MASTER_OUTPUT_GAIN;
-    limiter.threshold.value = -18;
+    limiter.threshold.value = -20;
     limiter.knee.value = 12;
-    limiter.ratio.value = 4;
+    limiter.ratio.value = 5;
     limiter.attack.value = 0.003;
-    limiter.release.value = 0.18;
+    limiter.release.value = 0.22;
     master.connect(limiter);
     limiter.connect(ctx.destination);
     audioRef.current = ctx;
@@ -260,6 +275,7 @@ export const ensureAudioGraph = (
     distortionTone.connect(distWet);
     distWet.connect(output);
     distortionTone.connect(delaySend);
+    distortionTone.connect(reverbSend);
 
     delaySend.connect(delay);
     delay.connect(feedback);
@@ -268,7 +284,6 @@ export const ensureAudioGraph = (
     delayTone.connect(delayWet);
     delayWet.connect(output);
 
-    delayTone.connect(reverbSend);
     reverbSend.connect(reverbPreDelay);
     reverbPreDelay.connect(reverbTone);
     reverbTone.connect(reverb);
@@ -364,60 +379,60 @@ export const syncLineAudioState = ({
   const now = atTime ?? ctx.currentTime;
   const outputGain = params.volume <= 0.0001 ? 0 : LINE_OUTPUT_HEADROOM_GAIN;
   if (audioParamChanged(fx.lastOutputGain, outputGain, 0.0005)) {
-    fx.output.gain.setValueAtTime(outputGain, now);
+    smoothAudioParam(fx.output.gain, outputGain, now, 0.03);
     fx.lastOutputGain = outputGain;
   }
 
   const delayTime = params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime;
   const nextDelayTime = Math.min(1, Math.max(0, delayTime));
   if (audioParamChanged(fx.lastDelayTime, nextDelayTime, 0.0005)) {
-    fx.delay.delayTime.setValueAtTime(nextDelayTime, now);
+    smoothAudioParam(fx.delay.delayTime, nextDelayTime, now, 0.04);
     fx.lastDelayTime = nextDelayTime;
   }
   const feedbackAmount = Math.min(0.92, Math.max(0, params.delayFeedback));
   if (audioParamChanged(fx.lastFeedbackAmount, feedbackAmount)) {
-    fx.feedback.gain.setValueAtTime(feedbackAmount, now);
+    smoothAudioParam(fx.feedback.gain, feedbackAmount, now, 0.04);
     fx.lastFeedbackAmount = feedbackAmount;
   }
   const delayMixAmount = Math.min(1, Math.max(0, params.delayMix));
   if (audioParamChanged(fx.lastDelayMixAmount, delayMixAmount)) {
-    fx.delayWet.gain.setValueAtTime(delayMixAmount, now);
+    smoothAudioParam(fx.delayWet.gain, delayMixAmount, now, 0.035);
     fx.lastDelayMixAmount = delayMixAmount;
   }
   const delayToneFrequency = Math.min(12000, Math.max(800, params.delayTone));
   if (audioParamChanged(fx.lastDelayTone, delayToneFrequency, 40)) {
-    fx.delayTone.frequency.setValueAtTime(delayToneFrequency, now);
+    smoothAudioParam(fx.delayTone.frequency, delayToneFrequency, now, 0.035);
     fx.lastDelayTone = delayToneFrequency;
   }
   const overdriveAmount = Math.min(1, Math.max(0, params.overdrive));
   if (Math.abs(fx.lastOverdriveAmount - overdriveAmount) > 0.002) {
     fx.overdrive.curve = overdriveAmount <= 0.002 ? null : getOverdriveCurve(overdriveAmount);
-    fx.overdriveWet.gain.setValueAtTime(overdriveAmount, now);
+    smoothAudioParam(fx.overdriveWet.gain, overdriveAmount, now, 0.03);
     fx.lastOverdriveAmount = overdriveAmount;
   }
   const overdriveToneFrequency = Math.min(14000, Math.max(800, params.overdriveTone));
   if (audioParamChanged(fx.lastOverdriveTone, overdriveToneFrequency, 40)) {
-    fx.overdriveTone.frequency.setValueAtTime(overdriveToneFrequency, now);
+    smoothAudioParam(fx.overdriveTone.frequency, overdriveToneFrequency, now, 0.035);
     fx.lastOverdriveTone = overdriveToneFrequency;
   }
   const distortionAmount = Math.min(1, Math.max(0, params.distortion));
   if (Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
     fx.distortion.curve = distortionAmount <= 0.002 ? null : getDistortionCurve(distortionAmount);
-    fx.distWet.gain.setValueAtTime(distortionAmount, now);
+    smoothAudioParam(fx.distWet.gain, distortionAmount, now, 0.03);
     fx.lastDistortionAmount = distortionAmount;
   }
   const distortionToneFrequency = Math.min(14000, Math.max(800, params.distortionTone));
   if (audioParamChanged(fx.lastDistortionTone, distortionToneFrequency, 40)) {
-    fx.distortionTone.frequency.setValueAtTime(distortionToneFrequency, now);
+    smoothAudioParam(fx.distortionTone.frequency, distortionToneFrequency, now, 0.035);
     fx.lastDistortionTone = distortionToneFrequency;
   }
   const reverbAmount = Math.min(1, Math.max(0, params.reverb));
   const reverbTail = Math.min(4, Math.max(0.4, params.reverbTail));
   const reverbPreDelay = Math.min(0.18, Math.max(0, params.reverbPreDelay));
   const reverbToneFrequency = Math.min(12000, Math.max(800, params.reverbTone));
-  const delayRouteAmount = Math.max(delayMixAmount, reverbAmount);
+  const delayRouteAmount = delayMixAmount;
   if (audioParamChanged(fx.lastDelayRouteAmount, delayRouteAmount)) {
-    fx.delaySend.gain.setValueAtTime(delayRouteAmount, now);
+    smoothAudioParam(fx.delaySend.gain, delayRouteAmount, now, 0.035);
     fx.lastDelayRouteAmount = delayRouteAmount;
   }
   if (audioParamChanged(fx.lastReverbTail, reverbTail, 0.05)) {
@@ -425,16 +440,16 @@ export const syncLineAudioState = ({
     fx.lastReverbTail = reverbTail;
   }
   if (audioParamChanged(fx.lastReverbPreDelay, reverbPreDelay, 0.002)) {
-    fx.reverbPreDelay.delayTime.setValueAtTime(reverbPreDelay, now);
+    smoothAudioParam(fx.reverbPreDelay.delayTime, reverbPreDelay, now, 0.04);
     fx.lastReverbPreDelay = reverbPreDelay;
   }
   if (audioParamChanged(fx.lastReverbTone, reverbToneFrequency, 40)) {
-    fx.reverbTone.frequency.setValueAtTime(reverbToneFrequency, now);
+    smoothAudioParam(fx.reverbTone.frequency, reverbToneFrequency, now, 0.035);
     fx.lastReverbTone = reverbToneFrequency;
   }
   if (audioParamChanged(fx.lastReverbAmount, reverbAmount)) {
-    fx.reverbSend.gain.setValueAtTime(reverbAmount, now);
-    fx.reverbWet.gain.setValueAtTime(reverbAmount, now);
+    smoothAudioParam(fx.reverbSend.gain, reverbAmount, now, 0.035);
+    smoothAudioParam(fx.reverbWet.gain, reverbAmount, now, 0.05);
     fx.lastReverbAmount = reverbAmount;
   }
 

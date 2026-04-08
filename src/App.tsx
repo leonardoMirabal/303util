@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
-import { delayTimeFromTempo, ensureAudioGraph, playScheduledStep, syncLineAudioState, type AudioLineFx } from "./audioEngine";
+import { ensureAudioGraph, playScheduledStep, syncLineAudioState, type AudioLineFx } from "./audioEngine";
 import "./App.css";
 
 const STEPS = 32;
@@ -505,6 +505,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
   const normalized = (value - min) / (max - min);
   const angle = -135 + normalized * 270;
   const style: React.CSSProperties & { "--angle": string } = { "--angle": `${angle}deg` };
+  const [showValueOverlay, setShowValueOverlay] = useState(false);
   const pointerRef = useRef<{
     pointerId: number;
     pointerType: string;
@@ -523,6 +524,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (disabled) return;
+    setShowValueOverlay(true);
     pointerRef.current = {
       pointerId: event.pointerId,
       pointerType: event.pointerType,
@@ -565,6 +567,7 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
       event.currentTarget.releasePointerCapture(pointer.pointerId);
     }
     pointerRef.current = null;
+    setShowValueOverlay(false);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -581,10 +584,10 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
   };
 
   return (
-    <div className="knob-control">
+    <div className={`knob-control${showValueOverlay ? " showing-value" : ""}`}>
       <span className="knob-label">{label}</span>
       <div
-        className="knob"
+        className={`knob${showValueOverlay ? " showing-value" : ""}`}
         style={style}
         role="slider"
         tabIndex={disabled ? -1 : 0}
@@ -597,8 +600,11 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
         onPointerMove={handlePointerMove}
         onPointerUp={clearPointer}
         onPointerCancel={clearPointer}
+        onLostPointerCapture={() => setShowValueOverlay(false)}
         onKeyDown={handleKeyDown}
+        onBlur={() => setShowValueOverlay(false)}
       >
+        <span className="knob-value">{displayValue}</span>
         <input
           className="knob-hit"
           type="range"
@@ -610,7 +616,6 @@ function KnobControl({ label, min, max, step = 1, value, onChange, format, disab
           onChange={(e) => onChange(Number(e.currentTarget.value))}
         />
       </div>
-      <span className="knob-value">{displayValue}</span>
     </div>
   );
 }
@@ -672,6 +677,14 @@ const getTieSpanLength = (steps: Step[], step: number, patternLength: number): n
   }
   return span;
 };
+
+const getDelaySubdivisionIndex = (subdivision: DelaySubdivision): number => {
+  const index = DELAY_SUBDIVISIONS.findIndex((entry) => entry.value === subdivision);
+  return index === -1 ? 0 : index;
+};
+
+const getDelaySubdivisionLabel = (subdivision: DelaySubdivision): string =>
+  DELAY_SUBDIVISIONS.find((entry) => entry.value === subdivision)?.label ?? DELAY_SUBDIVISIONS[0].label;
 
 const mapLegacyPatternLength = (raw: unknown): number => {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_PATTERN_LENGTH;
@@ -745,8 +758,10 @@ const loadFxVisibilitySettings = (): FxVisibilitySettings => {
 };
 
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
-const SCHEDULER_LOOKAHEAD_SECONDS = 0.12;
-const SCHEDULER_INTERVAL_MS = 25;
+const VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS = 0.2;
+const HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS = 2.2;
+const VISIBLE_SCHEDULER_INTERVAL_MS = 25;
+const HIDDEN_SCHEDULER_INTERVAL_MS = 250;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -1340,7 +1355,8 @@ function App() {
       const ctx = audioRef.current;
       if (!ctx) return;
       const currentTime = ctx.currentTime;
-      const scheduleUntil = currentTime + SCHEDULER_LOOKAHEAD_SECONDS;
+      const isHidden = document.visibilityState === "hidden";
+      const scheduleUntil = currentTime + (isHidden ? HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS : VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS);
       const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
         const line = linesNow[li];
@@ -1362,7 +1378,7 @@ function App() {
         }
         nextStepTimeRef.current[li] = nextStepTime;
       }
-      timerRef.current = window.setTimeout(tick, SCHEDULER_INTERVAL_MS);
+      timerRef.current = window.setTimeout(tick, isHidden ? HIDDEN_SCHEDULER_INTERVAL_MS : VISIBLE_SCHEDULER_INTERVAL_MS);
     };
     tick();
     return () => {
@@ -2585,6 +2601,16 @@ function App() {
     </div>
   );
 
+  const renderBpmVisualizer = (extraClassName?: string) => (
+    <div
+      className={extraClassName ? `bpm-visualizer ${extraClassName}` : "bpm-visualizer"}
+      aria-label={`Tempo ${tempo} BPM`}
+      title={`${tempo} BPM`}
+    >
+      <span>{tempo}</span>
+    </div>
+  );
+
   const toggleFxVisibility = (effect: FxMenuSection) => {
     setFxVisibility((prev) => {
       if (prev[effect]) {
@@ -2615,7 +2641,7 @@ function App() {
               {effectEnabled ? "Enabled" : maxFxReached ? "3 Max" : "Disabled"}
             </button>
           </div>
-          <div className="fx-menu-inline-controls">
+          <div className="fx-menu-inline-controls fx-menu-inline-controls-single">
             <button
               type="button"
               className={params.delaySync ? "selected" : ""}
@@ -2624,29 +2650,21 @@ function App() {
             >
               {params.delaySync ? "Sync" : "Free"}
             </button>
-            <select
-              aria-label="Delay subdivision"
-              value={params.delaySubdivision}
-              disabled={!effectEnabled || !params.delaySync}
-              onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-            >
-              {DELAY_SUBDIVISIONS.map((subdivision) => (
-                <option key={subdivision.value} value={subdivision.value}>
-                  {subdivision.label}
-                </option>
-              ))}
-            </select>
           </div>
           <div className="fx-menu-knobs fx-menu-knobs-delay">
             <KnobControl
               label="Delay Time"
               min={0}
-              max={1}
-              step={0.01}
-              value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-              disabled={!effectEnabled || params.delaySync}
-              onChange={(v) => updateParams({ delayTime: v })}
-              format={(v) => `${v.toFixed(2)}s`}
+              max={params.delaySync ? DELAY_SUBDIVISIONS.length - 1 : 1}
+              step={params.delaySync ? 1 : 0.01}
+              value={params.delaySync ? getDelaySubdivisionIndex(params.delaySubdivision) : params.delayTime}
+              disabled={!effectEnabled}
+              onChange={(v) =>
+                params.delaySync
+                  ? updateParams({ delaySubdivision: DELAY_SUBDIVISIONS[Math.round(v)]?.value ?? DELAY_SUBDIVISIONS[0].value })
+                  : updateParams({ delayTime: v })
+              }
+              format={(v) => (params.delaySync ? getDelaySubdivisionLabel(DELAY_SUBDIVISIONS[Math.round(v)]?.value ?? DELAY_SUBDIVISIONS[0].value) : `${v.toFixed(2)}s`)}
             />
             <KnobControl
               label="Feedback"
@@ -3321,6 +3339,7 @@ function App() {
                 {currentPatternLabel}
               </button>
               <div className="mobile-summary-actions">
+                {renderBpmVisualizer()}
                 <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                   {isPlaying ? "Stop" : "Play"}
                 </button>
@@ -3382,6 +3401,7 @@ function App() {
               {currentPatternLabel}
             </button>
             <div className="mobile-summary-actions">
+              {renderBpmVisualizer("desktop-bpm-visualizer")}
               <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
                 {isPlaying ? "Stop" : "Play"}
               </button>
@@ -3502,29 +3522,20 @@ function App() {
                             >
                               {params.delaySync ? "S" : "F"}
                             </button>
-                            <select
-                              aria-label="Delay subdivision"
-                              value={params.delaySubdivision}
-                              disabled={!params.delaySync}
-                              onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                            >
-                              {DELAY_SUBDIVISIONS.map((subdivision) => (
-                                <option key={subdivision.value} value={subdivision.value}>
-                                  {subdivision.label}
-                                </option>
-                              ))}
-                            </select>
                           </div>
                         </div>
                         <KnobControl
                           label={synthLabels.delayTime}
                           min={0}
-                          max={1}
-                          step={0.01}
-                          value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-                          disabled={params.delaySync}
-                          onChange={(v) => updateParams({ delayTime: v })}
-                          format={(v) => `${v.toFixed(2)}s`}
+                          max={params.delaySync ? DELAY_SUBDIVISIONS.length - 1 : 1}
+                          step={params.delaySync ? 1 : 0.01}
+                          value={params.delaySync ? getDelaySubdivisionIndex(params.delaySubdivision) : params.delayTime}
+                          onChange={(v) =>
+                            params.delaySync
+                              ? updateParams({ delaySubdivision: DELAY_SUBDIVISIONS[Math.round(v)]?.value ?? DELAY_SUBDIVISIONS[0].value })
+                              : updateParams({ delayTime: v })
+                          }
+                          format={(v) => (params.delaySync ? getDelaySubdivisionLabel(DELAY_SUBDIVISIONS[Math.round(v)]?.value ?? DELAY_SUBDIVISIONS[0].value) : `${v.toFixed(2)}s`)}
                         />
                         <KnobControl label={synthLabels.feedback} min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
                         <KnobControl label={synthLabels.delayMix} min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
@@ -3596,28 +3607,20 @@ function App() {
                             >
                               {params.delaySync ? "SYNC" : "FREE"}
                             </button>
-                            <select
-                              value={params.delaySubdivision}
-                              disabled={!params.delaySync}
-                              onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                            >
-                              {DELAY_SUBDIVISIONS.map((subdivision) => (
-                                <option key={subdivision.value} value={subdivision.value}>
-                                  {subdivision.label}
-                                </option>
-                              ))}
-                            </select>
                           </div>
                         </div>
                         <KnobControl
                           label="Delay Time"
                           min={0}
-                          max={1}
-                          step={0.01}
-                          value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-                          disabled={params.delaySync}
-                          onChange={(v) => updateParams({ delayTime: v })}
-                          format={(v) => `${v.toFixed(2)}s`}
+                          max={params.delaySync ? DELAY_SUBDIVISIONS.length - 1 : 1}
+                          step={params.delaySync ? 1 : 0.01}
+                          value={params.delaySync ? getDelaySubdivisionIndex(params.delaySubdivision) : params.delayTime}
+                          onChange={(v) =>
+                            params.delaySync
+                              ? updateParams({ delaySubdivision: DELAY_SUBDIVISIONS[Math.round(v)]?.value ?? DELAY_SUBDIVISIONS[0].value })
+                              : updateParams({ delayTime: v })
+                          }
+                          format={(v) => (params.delaySync ? getDelaySubdivisionLabel(DELAY_SUBDIVISIONS[Math.round(v)]?.value ?? DELAY_SUBDIVISIONS[0].value) : `${v.toFixed(2)}s`)}
                         />
                         <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
                         <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
