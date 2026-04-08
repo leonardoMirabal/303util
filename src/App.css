@@ -1826,12 +1826,12 @@ button.selected {
   }
 
   .main-knobs {
-    grid-template-columns: 22px repeat(6, 48px);
+    grid-template-columns: 20px repeat(6, 44px);
   }
 
   .fx-knobs {
-    grid-template-columns: repeat(7, 48px);
-    padding-inline-end: 4px;
+    grid-template-columns: repeat(7, 44px);
+    padding-inline-end: 2px;
   }
 
   .wave-toggle button {
@@ -1842,11 +1842,11 @@ button.selected {
   }
 
   .volume-knob-slot {
-    width: 36px;
+    width: 34px;
   }
 
   .wave-knob-slot {
-    width: 22px;
+    width: 20px;
     justify-content: center;
   }
 
@@ -1859,7 +1859,7 @@ button.selected {
   }
 
   .tempo-button-stack {
-    width: 32px;
+    width: 30px;
     display: grid;
     grid-template-rows: repeat(2, minmax(0, 1fr));
     gap: 2px;
@@ -1872,7 +1872,7 @@ button.selected {
   }
 
   .tempo-button-stack .tempo-action-button {
-    min-width: 32px;
+    min-width: 30px;
     height: 15px;
     padding: 0 2px;
     font-size: 0.48rem;
@@ -1880,7 +1880,7 @@ button.selected {
   }
 
   .stack-control {
-    grid-template-rows: 12px minmax(0, 32px);
+    grid-template-rows: 11px minmax(0, 30px);
   }
 
   .pattern-transpose-control {
@@ -1889,8 +1889,8 @@ button.selected {
   }
 
   .pattern-transpose-stack {
-    width: 38px;
-    min-height: 36px;
+    width: 32px;
+    min-height: 34px;
     gap: 1px;
   }
 
@@ -1903,28 +1903,28 @@ button.selected {
   }
 
   .knob {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
   }
 
   .knob::before {
-    height: 11px;
+    height: 10px;
     top: 4px;
-    transform-origin: 50% 13px;
+    transform-origin: 50% 12px;
   }
 
   .delay-sync-control button,
   .delay-sync-control select {
     height: 15px;
-    width: 40px;
-    min-width: 40px;
+    width: 36px;
+    min-width: 36px;
     padding: 0 2px;
     font-size: 0.48rem;
     line-height: 1;
   }
 
   .delay-sync-control {
-    width: 40px;
+    width: 36px;
     align-self: center;
     grid-template-rows: repeat(2, minmax(0, 1fr));
     gap: 2px;
@@ -1933,7 +1933,7 @@ button.selected {
   .knob-control {
     width: 100%;
     min-width: 0;
-    grid-template-rows: 12px 32px;
+    grid-template-rows: 11px 30px;
     align-items: start;
     overflow: hidden;
   }
@@ -1948,7 +1948,7 @@ button.selected {
 
   .knob-label {
     width: 100%;
-    min-height: 12px;
+    min-height: 11px;
     line-height: 1;
     text-align: center;
     display: flex;
@@ -1957,7 +1957,7 @@ button.selected {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.42rem;
+    font-size: 0.4rem;
     letter-spacing: 0.02em;
   }
 
@@ -1978,7 +1978,7 @@ button.selected {
   }
 
   .delay-divider {
-    margin-inline: 3px;
+    margin-inline: 2px;
     min-height: 28px;
   }
 
