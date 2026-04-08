@@ -1,6 +1,10 @@
 # 303 util User Manual
 
-**303 util** is a compact TB-303 pattern editor, multi-voice sketchpad, and sheet generator with **up to 32 steps per voice**. The main workflow is simple: create or load a pattern, build it in the editor, shape the sound for each voice, and export a clean TB-303-style chart from **Sheet** view.
+**303 util** is a tool for TB-303 lovers who care more about writing great patterns than fighting the original hardware workflow. Programming a real 303 can be inspiring, but it can also be slow, awkward, and painfully restrictive when you are trying to explore ideas quickly. This app is built to unlock the pattern-writing side of the TB-303 in a much easier and more practical way, while still respecting what makes the machine special.
+
+With **303 util**, you can sketch, edit, and compare sequences quickly, work on **multiple 303 lines at the same time**, and build patterns with **up to 32 steps per voice**. Instead of getting stuck inside the classic button-combination workflow, you can focus on the musical result: note placement, accents, slides, transpositions, timing, and arrangement across several voices. That makes it much easier to experiment, iterate, and push the pattern capabilities of the 303 further than you comfortably could on the hardware alone.
+
+The goal of the app is **not** to be a perfect sonic emulator of the TB-303. Its main purpose is pattern creation and documentation. Where it really shines is in helping you design patterns clearly, then export a clean sheet you can use to transfer those ideas back to a real 303 later, using the original hardware programming method if you want. In that sense, it is a workflow tool made by and for people who love the TB-303, including the old painful way of entering patterns, but want a better way to get there.
 
 The original sound engine code is based on [thedjinn/js303](https://github.com/thedjinn/js303).
 

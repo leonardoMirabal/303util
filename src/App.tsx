@@ -176,6 +176,7 @@ const DRIVE_BACKUP_FOLDER_NAME = "TB-303 Companion Backups";
 const DRIVE_BACKUP_FILE_NAME = "tb303-backup.json";
 const GOOGLE_SYNC_ENABLED_KEY = "tb303:google-sync-enabled";
 const FX_VISIBILITY_KEY = "tb303:fx-visibility";
+const DEFAULT_UNSAVED_PATTERN_NAME = "changeme";
 const MAX_VISIBLE_FX = 3;
 const FX_VISIBILITY_ORDER: Array<keyof FxVisibilitySettings> = ["delay", "reverb", "overdrive", "distortion"];
 const DEFAULT_FX_VISIBILITY_SETTINGS: FxVisibilitySettings = {
@@ -272,17 +273,6 @@ const defaultParams = (): VoiceParams => ({
   reverbTail: 2.0,
   reverbPreDelay: 0.02,
   reverbTone: 6800,
-});
-
-const zeroFxParams = (params: VoiceParams): VoiceParams => ({
-  ...params,
-  delayTime: 0,
-  delaySync: false,
-  delayFeedback: 0,
-  delayMix: 0,
-  overdrive: 0,
-  distortion: 0,
-  reverb: 0,
 });
 
 const makeLine = (): LineState => ({
@@ -388,14 +378,48 @@ const BLANK_PROJECT_TEMPLATE: ProjectData = (() => {
   const voice1 = makeLine();
   const voice2 = makeLine();
   const voice3 = makeLine();
-  voice2.params.delaySubdivision = "1/8.";
+  voice1.params = {
+    ...voice1.params,
+    cutoff: 606,
+    resonance: 4,
+    envMod: 287,
+    accent: 2.5,
+    volume: 0.42,
+    delayTime: 0.24,
+    delaySync: true,
+    delaySubdivision: "1/8.",
+    delayFeedback: 0.68,
+    delayMix: 0.5,
+  };
+  voice2.patternLength = 8;
+  voice2.params = {
+    ...voice2.params,
+    delayTime: 0.24,
+    delaySync: true,
+    delaySubdivision: "1/8.",
+    delayFeedback: 0.32,
+    delayMix: 0.26,
+    overdrive: 0.12,
+    reverb: 0.16,
+  };
+  voice3.patternLength = 8;
+  voice3.params = {
+    ...voice3.params,
+    delayTime: 0.24,
+    delaySync: true,
+    delaySubdivision: "1/8",
+    delayFeedback: 0.32,
+    delayMix: 0.26,
+    overdrive: 0.12,
+    reverb: 0.16,
+  };
   return {
     version: 1,
-    programName: "pattern 1",
+    programName: DEFAULT_UNSAVED_PATTERN_NAME,
     lineCount: 3,
     scalePresetId: "off",
     scaleRoot: "C",
-    tempo: 126,
+    tempo: 94,
     selectedLine: 0,
     lines: [voice1, voice2, voice3],
   };
@@ -475,6 +499,7 @@ type KnobProps = {
 
 type MobileHeaderSection = "pattern" | "scale" | "fx" | "utilities";
 type FxMenuSection = keyof FxVisibilitySettings;
+type NewPatternModalMode = "create" | "save";
 
 function KnobControl({ label, min, max, step = 1, value, onChange, format, disabled = false }: KnobProps) {
   const normalized = (value - min) / (max - min);
@@ -789,8 +814,9 @@ function App() {
   const [isLibraryPickerOpen, setIsLibraryPickerOpen] = useState(false);
   const [pickerLibraryId, setPickerLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
   const [isNewPatternModalOpen, setIsNewPatternModalOpen] = useState(false);
-  const [newPatternName, setNewPatternName] = useState("New Pattern");
+  const [newPatternName, setNewPatternName] = useState(DEFAULT_UNSAVED_PATTERN_NAME);
   const [newPatternLibraryId, setNewPatternLibraryId] = useState<string>(() => window.localStorage.getItem(LAST_LIBRARY_ID_KEY) ?? "default");
+  const [newPatternModalMode, setNewPatternModalMode] = useState<NewPatternModalMode>("create");
   const [isNewLibraryModalOpen, setIsNewLibraryModalOpen] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState("");
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState | null>(null);
@@ -2009,7 +2035,7 @@ function App() {
           id,
           libraryId,
           name,
-          project: JSON.parse(JSON.stringify(buildProjectSnapshot())) as ProjectData,
+          project: JSON.parse(JSON.stringify({ ...buildProjectSnapshot(), programName: name })) as ProjectData,
           createdAt: createdAt ?? now,
           updatedAt: now,
         } satisfies PatternRecord);
@@ -2037,18 +2063,12 @@ function App() {
     const nameMatch = patterns.find((pattern) => pattern.libraryId === targetLibraryId && pattern.name === targetName);
 
     if (!selectedPattern) {
-      if (nameMatch) {
-        const ok = window.confirm(`Pattern "${targetName}" already exists in this lib. Overwrite it?`);
-        if (!ok) return;
-        await savePatternRecord({
-          patternId: nameMatch.id,
-          libraryId: targetLibraryId,
-          name: targetName,
-          createdAt: nameMatch.createdAt,
-        });
-        return;
-      }
-      await savePatternRecord({ libraryId: targetLibraryId, name: targetName });
+      setNewPatternModalMode("save");
+      setNewPatternName(programName.trim() || DEFAULT_UNSAVED_PATTERN_NAME);
+      setNewPatternLibraryId(targetLibraryId);
+      setMobileProjectOpen(false);
+      setIsLibraryPickerOpen(false);
+      setIsNewPatternModalOpen(true);
       return;
     }
 
@@ -2120,6 +2140,7 @@ function App() {
   };
 
   const openNewPatternModal = (libraryId = selectedLibraryId) => {
+    setNewPatternModalMode("create");
     setNewPatternName("New Pattern");
     setNewPatternLibraryId(libraryId);
     setMobileProjectOpen(false);
@@ -2134,6 +2155,22 @@ function App() {
       return;
     }
     setIsNewPatternModalOpen(false);
+    if (newPatternModalMode === "save") {
+      const nameMatch = patterns.find((pattern) => pattern.libraryId === newPatternLibraryId && pattern.name === trimmed);
+      if (nameMatch) {
+        const ok = window.confirm(`Pattern "${trimmed}" already exists in this lib. Overwrite it?`);
+        if (!ok) return;
+        await savePatternRecord({
+          patternId: nameMatch.id,
+          libraryId: newPatternLibraryId,
+          name: trimmed,
+          createdAt: nameMatch.createdAt,
+        });
+        return;
+      }
+      await savePatternRecord({ libraryId: newPatternLibraryId, name: trimmed });
+      return;
+    }
     await createEmptyPattern(trimmed, newPatternLibraryId);
   };
 
@@ -2158,15 +2195,14 @@ function App() {
     const blankProject = blankProjectState();
     const emptyProject: ProjectData = {
       ...blankProject,
-      programName: "Untitled",
-      lines: blankProject.lines.map((line) => ({ ...line, params: zeroFxParams(line.params) })),
+      programName: DEFAULT_UNSAVED_PATTERN_NAME,
     };
     setSelectedLibraryId(libraryId);
     setSelectedPatternId("");
     loadPattern({
       id: "unsaved-empty",
       libraryId,
-      name: "Untitled",
+      name: DEFAULT_UNSAVED_PATTERN_NAME,
       project: emptyProject,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -2992,7 +3028,7 @@ function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-header">
-              <h2 id="new-pattern-title">New pattern</h2>
+              <h2 id="new-pattern-title">{newPatternModalMode === "save" ? "Save pattern" : "New pattern"}</h2>
               <button type="button" onClick={() => setIsNewPatternModalOpen(false)}>
                 Close
               </button>
@@ -3013,7 +3049,7 @@ function App() {
                   Cancel
                 </button>
                 <button type="submit" className="selected">
-                  Create
+                  {newPatternModalMode === "save" ? "Save" : "Create"}
                 </button>
               </div>
             </form>
