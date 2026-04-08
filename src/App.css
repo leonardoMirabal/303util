@@ -157,6 +157,68 @@ body {
   text-overflow: ellipsis;
 }
 
+.settings-subsection {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-subsection-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #eef2f6;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.settings-helper {
+  font-size: 0.72rem;
+  color: #c7d0da;
+}
+
+.fx-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fx-menu-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #5b6672;
+  border-radius: 8px;
+  background: #394049;
+}
+
+.fx-menu-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fx-menu-panel-header button {
+  min-width: 96px;
+}
+
+.fx-menu-inline-controls {
+  display: grid;
+  grid-template-columns: minmax(90px, 120px) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.fx-menu-inline-controls button,
+.fx-menu-inline-controls select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+}
+
+.fx-menu-knobs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 10px;
+  justify-items: center;
+}
+
 .library-picker-list {
   display: grid;
   gap: 6px;
@@ -1538,7 +1600,7 @@ button.selected {
 
   .mobile-header-groups {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 2px;
   }
 
@@ -1601,6 +1663,14 @@ button.selected {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .settings-subsection {
+    gap: 4px;
+  }
+
+  .settings-subsection-label {
+    font-size: 0.56rem;
   }
 
   .mobile-google-sync-status {

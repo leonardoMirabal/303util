@@ -59,8 +59,22 @@ type VoiceParams = {
   delaySubdivision: DelaySubdivision;
   delayFeedback: number;
   delayMix: number;
+  delayTone: number;
+  overdrive: number;
+  overdriveTone: number;
   distortion: number;
+  distortionTone: number;
   reverb: number;
+  reverbTail: number;
+  reverbPreDelay: number;
+  reverbTone: number;
+};
+
+type FxVisibilitySettings = {
+  delay: boolean;
+  reverb: boolean;
+  overdrive: boolean;
+  distortion: boolean;
 };
 
 type LineState = {
@@ -161,6 +175,15 @@ const GOOGLE_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const DRIVE_BACKUP_FOLDER_NAME = "TB-303 Companion Backups";
 const DRIVE_BACKUP_FILE_NAME = "tb303-backup.json";
 const GOOGLE_SYNC_ENABLED_KEY = "tb303:google-sync-enabled";
+const FX_VISIBILITY_KEY = "tb303:fx-visibility";
+const MAX_VISIBLE_FX = 3;
+const FX_VISIBILITY_ORDER: Array<keyof FxVisibilitySettings> = ["delay", "reverb", "overdrive", "distortion"];
+const DEFAULT_FX_VISIBILITY_SETTINGS: FxVisibilitySettings = {
+  delay: true,
+  reverb: true,
+  overdrive: true,
+  distortion: false,
+};
 
 let googleScriptPromise: Promise<void> | null = null;
 
@@ -235,13 +258,31 @@ const defaultParams = (): VoiceParams => ({
   decay: 0.22,
   accent: 1.45,
   volume: 0.26,
-  delayTime: 0.24,
-  delaySync: true,
+  delayTime: 0,
+  delaySync: false,
   delaySubdivision: "1/8",
-  delayFeedback: 0.32,
-  delayMix: 0.26,
-  distortion: 0.12,
-  reverb: 0.16,
+  delayFeedback: 0,
+  delayMix: 0,
+  delayTone: 8200,
+  overdrive: 0,
+  overdriveTone: 9200,
+  distortion: 0,
+  distortionTone: 7600,
+  reverb: 0,
+  reverbTail: 2.0,
+  reverbPreDelay: 0.02,
+  reverbTone: 6800,
+});
+
+const zeroFxParams = (params: VoiceParams): VoiceParams => ({
+  ...params,
+  delayTime: 0,
+  delaySync: false,
+  delayFeedback: 0,
+  delayMix: 0,
+  overdrive: 0,
+  distortion: 0,
+  reverb: 0,
 });
 
 const makeLine = (): LineState => ({
@@ -294,8 +335,15 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
         delaySubdivision: "1/8.",
         delayFeedback: 0.41,
         delayMix: 0.51,
+        delayTone: 8400,
+        overdrive: 0,
+        overdriveTone: 9200,
         distortion: 0,
+        distortionTone: 7600,
         reverb: 0.28,
+        reverbTail: 2.0,
+        reverbPreDelay: 0.02,
+        reverbTone: 7000,
       },
     },
     {
@@ -316,8 +364,15 @@ const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
         delaySubdivision: "1/8.",
         delayFeedback: 0.44,
         delayMix: 0.51,
-        distortion: 0.12,
+        delayTone: 7800,
+        overdrive: 0.12,
+        overdriveTone: 8600,
+        distortion: 0,
+        distortionTone: 7600,
         reverb: 0.16,
+        reverbTail: 2.0,
+        reverbPreDelay: 0.01,
+        reverbTone: 6200,
       },
     },
     {
@@ -418,7 +473,8 @@ type KnobProps = {
   disabled?: boolean;
 };
 
-type MobileHeaderSection = "pattern" | "scale" | "utilities";
+type MobileHeaderSection = "pattern" | "scale" | "fx" | "utilities";
+type FxMenuSection = keyof FxVisibilitySettings;
 
 function KnobControl({ label, min, max, step = 1, value, onChange, format, disabled = false }: KnobProps) {
   const normalized = (value - min) / (max - min);
@@ -619,6 +675,32 @@ const compareVersionTags = (left: string, right: string): number => {
   return 0;
 };
 
+const normalizeFxVisibilitySettings = (settings: FxVisibilitySettings): FxVisibilitySettings => {
+  let enabledCount = 0;
+  return FX_VISIBILITY_ORDER.reduce((acc, key) => {
+    const nextEnabled = settings[key] && enabledCount < MAX_VISIBLE_FX;
+    if (nextEnabled) enabledCount += 1;
+    acc[key] = nextEnabled;
+    return acc;
+  }, {} as FxVisibilitySettings);
+};
+
+const loadFxVisibilitySettings = (): FxVisibilitySettings => {
+  const raw = window.localStorage.getItem(FX_VISIBILITY_KEY);
+  if (!raw) return DEFAULT_FX_VISIBILITY_SETTINGS;
+  try {
+    const parsed = JSON.parse(raw) as Partial<FxVisibilitySettings>;
+    return normalizeFxVisibilitySettings({
+      delay: parsed.delay !== false,
+      reverb: parsed.reverb !== false,
+      overdrive: parsed.overdrive !== false,
+      distortion: parsed.distortion === true,
+    });
+  } catch {
+    return DEFAULT_FX_VISIBILITY_SETTINGS;
+  }
+};
+
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
 const SCHEDULER_LOOKAHEAD_SECONDS = 0.12;
 const SCHEDULER_INTERVAL_MS = 25;
@@ -713,6 +795,8 @@ function App() {
   const [newLibraryName, setNewLibraryName] = useState("");
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState | null>(null);
   const [isInitDialogOpen, setIsInitDialogOpen] = useState(false);
+  const [fxVisibility, setFxVisibility] = useState<FxVisibilitySettings>(() => loadFxVisibilitySettings());
+  const [selectedFxMenu, setSelectedFxMenu] = useState<FxMenuSection>("delay");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1015,10 +1099,21 @@ function App() {
     applyPatternTimingMode(nextMode);
   };
 
+  const applyFxVisibilityToParams = (params: VoiceParams): VoiceParams => ({
+    ...params,
+    delayTime: fxVisibility.delay ? params.delayTime : 0,
+    delaySync: fxVisibility.delay ? params.delaySync : false,
+    delayFeedback: fxVisibility.delay ? params.delayFeedback : 0,
+    delayMix: fxVisibility.delay ? params.delayMix : 0,
+    overdrive: fxVisibility.overdrive ? params.overdrive : 0,
+    distortion: fxVisibility.distortion ? params.distortion : 0,
+    reverb: fxVisibility.reverb ? params.reverb : 0,
+  });
+
   const playStep = (lineIndex: number, line: LineState, stepIndex: number, stepLenSeconds: number, startTime?: number) => {
     playScheduledStep({
       lineIndex,
-      line,
+      line: { ...line, params: applyFxVisibilityToParams(line.params) },
       stepIndex,
       stepLenSeconds,
       startTime,
@@ -1075,6 +1170,9 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(LAST_PATTERN_ID_KEY, selectedPatternId);
   }, [selectedPatternId]);
+  useEffect(() => {
+    window.localStorage.setItem(FX_VISIBILITY_KEY, JSON.stringify(fxVisibility));
+  }, [fxVisibility]);
 
   useEffect(() => {
     transposeOriginRef.current = null;
@@ -1418,8 +1516,21 @@ function App() {
         delaySubdivision: isDelaySubdivision(paramsRaw.delaySubdivision) ? paramsRaw.delaySubdivision : "1/8",
         delayFeedback: Number(paramsRaw.delayFeedback),
         delayMix: Number(paramsRaw.delayMix),
-        distortion: typeof paramsRaw.distortion === "number" ? Number(paramsRaw.distortion) : 0,
+        delayTone: typeof paramsRaw.delayTone === "number" ? Number(paramsRaw.delayTone) : 8200,
+        overdrive:
+          typeof paramsRaw.overdrive === "number"
+            ? Number(paramsRaw.overdrive)
+            : typeof paramsRaw.distortion === "number"
+              ? Number(paramsRaw.distortion)
+              : 0,
+        overdriveTone: typeof paramsRaw.overdriveTone === "number" ? Number(paramsRaw.overdriveTone) : 9200,
+        distortion:
+          typeof paramsRaw.overdrive === "number" && typeof paramsRaw.distortion === "number" ? Number(paramsRaw.distortion) : 0,
+        distortionTone: typeof paramsRaw.distortionTone === "number" ? Number(paramsRaw.distortionTone) : 7600,
         reverb: typeof paramsRaw.reverb === "number" ? Number(paramsRaw.reverb) : 0,
+        reverbTail: typeof paramsRaw.reverbTail === "number" ? Number(paramsRaw.reverbTail) : 2.0,
+        reverbPreDelay: typeof paramsRaw.reverbPreDelay === "number" ? Number(paramsRaw.reverbPreDelay) : 0.02,
+        reverbTone: typeof paramsRaw.reverbTone === "number" ? Number(paramsRaw.reverbTone) : 6800,
       };
       if (Object.values(params).some((v) => (typeof v === "number" ? !Number.isFinite(v) : false))) {
         throw new Error(`Voice ${lineIndex + 1} params contain invalid numbers.`);
@@ -2044,7 +2155,12 @@ function App() {
   };
 
   const openUnsavedEmptyPattern = (libraryId = selectedLibraryId) => {
-    const emptyProject: ProjectData = { ...blankProjectState(), programName: "Untitled" };
+    const blankProject = blankProjectState();
+    const emptyProject: ProjectData = {
+      ...blankProject,
+      programName: "Untitled",
+      lines: blankProject.lines.map((line) => ({ ...line, params: zeroFxParams(line.params) })),
+    };
     setSelectedLibraryId(libraryId);
     setSelectedPatternId("");
     loadPattern({
@@ -2284,6 +2400,12 @@ function App() {
   const currentLibraryLabel = libraries.find((library) => library.id === selectedLibraryId)?.name ?? "Library";
   const currentPatternName = programName.trim() || selectedSavedPattern?.name || "Untitled";
   const currentPatternLabel = `${currentLibraryLabel} > ${currentPatternName}`;
+  const fxOptions: Array<{ key: keyof FxVisibilitySettings; label: string }> = [
+    { key: "delay", label: "Delay" },
+    { key: "reverb", label: "Reverb" },
+    { key: "overdrive", label: "Overdrive" },
+    { key: "distortion", label: "Distortion" },
+  ];
   const scalePitchClasses = scaleEnabled ? buildScalePitchClassSet(scaleRoot, scalePresetId) : null;
   const getPitchHighlightClass = (pitch: PitchName) => {
     if (!scalePitchClasses) return "";
@@ -2293,8 +2415,8 @@ function App() {
     return "";
   };
   const synthLabels = isMobileViewport
-    ? { resonance: "RES", envMod: "ENV", accent: "ACC", volume: "VOL", delayTime: "TIME", feedback: "FDBK", delayMix: "MIX", distortion: "DIST", reverb: "REV" }
-    : { resonance: "Resonance", envMod: "Env Mod", accent: "Accent", volume: "Volume", delayTime: "Delay Time", feedback: "Feedback", delayMix: "Delay Mix", distortion: "Distortion", reverb: "Reverb" };
+    ? { resonance: "RES", envMod: "ENV", accent: "ACC", volume: "VOL", delayTime: "TIME", feedback: "FDBK", delayMix: "MIX", overdrive: "DRV", distortion: "DIST", reverb: "REV" }
+    : { resonance: "Resonance", envMod: "Env Mod", accent: "Accent", volume: "Volume", delayTime: "Delay Time", feedback: "Feedback", delayMix: "Delay Mix", overdrive: "Overdrive", distortion: "Distortion", reverb: "Reverb" };
   const enterFullscreen = () => {
     const fullDoc = document as FullscreenDocument;
     const fullElement = document.documentElement as FullscreenElement;
@@ -2374,6 +2496,237 @@ function App() {
       </button>
     </div>
   );
+
+  const toggleFxVisibility = (effect: FxMenuSection) => {
+    setFxVisibility((prev) => {
+      if (prev[effect]) {
+        return { ...prev, [effect]: false };
+      }
+      const enabledCount = FX_VISIBILITY_ORDER.filter((key) => prev[key]).length;
+      if (enabledCount >= MAX_VISIBLE_FX) {
+        return prev;
+      }
+      return { ...prev, [effect]: true };
+    });
+  };
+
+  const renderFxMenuControls = () => {
+    const effectEnabled = fxVisibility[selectedFxMenu];
+    const enabledEffectCount = FX_VISIBILITY_ORDER.filter((key) => fxVisibility[key]).length;
+    const maxFxReached = !effectEnabled && enabledEffectCount >= MAX_VISIBLE_FX;
+
+    if (selectedFxMenu === "delay") {
+      return (
+        <div className="fx-menu-panel">
+          <div className="fx-menu-panel-header">
+            <div>
+              <div className="settings-subsection-label">Delay</div>
+              <div className="settings-helper">Time, feedback, and mix live here.</div>
+            </div>
+            <button type="button" className={effectEnabled ? "selected" : ""} onClick={() => toggleFxVisibility("delay")} disabled={maxFxReached}>
+              {effectEnabled ? "Enabled" : maxFxReached ? "3 Max" : "Disabled"}
+            </button>
+          </div>
+          <div className="fx-menu-inline-controls">
+            <button
+              type="button"
+              className={params.delaySync ? "selected" : ""}
+              onClick={() => updateParams({ delaySync: !params.delaySync })}
+              disabled={!effectEnabled}
+            >
+              {params.delaySync ? "Sync" : "Free"}
+            </button>
+            <select
+              aria-label="Delay subdivision"
+              value={params.delaySubdivision}
+              disabled={!effectEnabled || !params.delaySync}
+              onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+            >
+              {DELAY_SUBDIVISIONS.map((subdivision) => (
+                <option key={subdivision.value} value={subdivision.value}>
+                  {subdivision.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="fx-menu-knobs fx-menu-knobs-delay">
+            <KnobControl
+              label="Delay Time"
+              min={0}
+              max={1}
+              step={0.01}
+              value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+              disabled={!effectEnabled || params.delaySync}
+              onChange={(v) => updateParams({ delayTime: v })}
+              format={(v) => `${v.toFixed(2)}s`}
+            />
+            <KnobControl
+              label="Feedback"
+              min={0}
+              max={0.92}
+              step={0.01}
+              value={params.delayFeedback}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ delayFeedback: v })}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <KnobControl
+              label="Delay Mix"
+              min={0}
+              max={1}
+              step={0.01}
+              value={params.delayMix}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ delayMix: v })}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <KnobControl
+              label="Tone"
+              min={800}
+              max={12000}
+              step={100}
+              value={params.delayTone}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ delayTone: v })}
+              format={(v) => `${(v / 1000).toFixed(1)}k`}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    if (selectedFxMenu === "reverb") {
+      return (
+        <div className="fx-menu-panel">
+          <div className="fx-menu-panel-header">
+            <div>
+              <div className="settings-subsection-label">Reverb</div>
+              <div className="settings-helper">Room amount plus the hidden tail length control.</div>
+            </div>
+            <button type="button" className={effectEnabled ? "selected" : ""} onClick={() => toggleFxVisibility("reverb")} disabled={maxFxReached}>
+              {effectEnabled ? "Enabled" : maxFxReached ? "3 Max" : "Disabled"}
+            </button>
+          </div>
+          <div className="fx-menu-knobs">
+            <KnobControl
+              label="Reverb"
+              min={0}
+              max={1}
+              step={0.01}
+              value={params.reverb}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ reverb: v })}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <KnobControl
+              label="Tail"
+              min={0.4}
+              max={4}
+              step={0.1}
+              value={params.reverbTail}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ reverbTail: v })}
+              format={(v) => `${v.toFixed(1)}s`}
+            />
+            <KnobControl
+              label="Pre Delay"
+              min={0}
+              max={0.18}
+              step={0.01}
+              value={params.reverbPreDelay}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ reverbPreDelay: v })}
+              format={(v) => `${Math.round(v * 1000)}ms`}
+            />
+            <KnobControl
+              label="Tone"
+              min={800}
+              max={12000}
+              step={100}
+              value={params.reverbTone}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ reverbTone: v })}
+              format={(v) => `${(v / 1000).toFixed(1)}k`}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    if (selectedFxMenu === "overdrive") {
+      return (
+        <div className="fx-menu-panel">
+          <div className="fx-menu-panel-header">
+            <div>
+              <div className="settings-subsection-label">Overdrive</div>
+              <div className="settings-helper">Softer drive before the heavier distortion stage.</div>
+            </div>
+            <button type="button" className={effectEnabled ? "selected" : ""} onClick={() => toggleFxVisibility("overdrive")} disabled={maxFxReached}>
+              {effectEnabled ? "Enabled" : maxFxReached ? "3 Max" : "Disabled"}
+            </button>
+          </div>
+          <div className="fx-menu-knobs">
+            <KnobControl
+              label="Overdrive"
+              min={0}
+              max={1}
+              step={0.01}
+              value={params.overdrive}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ overdrive: v })}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <KnobControl
+              label="Tone"
+              min={800}
+              max={14000}
+              step={100}
+              value={params.overdriveTone}
+              disabled={!effectEnabled}
+              onChange={(v) => updateParams({ overdriveTone: v })}
+              format={(v) => `${(v / 1000).toFixed(1)}k`}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="fx-menu-panel">
+        <div className="fx-menu-panel-header">
+          <div>
+            <div className="settings-subsection-label">Distortion</div>
+            <div className="settings-helper">Heavier drive after overdrive.</div>
+          </div>
+          <button type="button" className={effectEnabled ? "selected" : ""} onClick={() => toggleFxVisibility("distortion")} disabled={maxFxReached}>
+            {effectEnabled ? "Enabled" : maxFxReached ? "3 Max" : "Disabled"}
+          </button>
+        </div>
+        <div className="fx-menu-knobs">
+          <KnobControl
+            label="Distortion"
+            min={0}
+            max={1}
+            step={0.01}
+            value={params.distortion}
+            disabled={!effectEnabled}
+            onChange={(v) => updateParams({ distortion: v })}
+            format={(v) => `${Math.round(v * 100)}%`}
+          />
+          <KnobControl
+            label="Tone"
+            min={800}
+            max={14000}
+            step={100}
+            value={params.distortionTone}
+            disabled={!effectEnabled}
+            onChange={(v) => updateParams({ distortionTone: v })}
+            format={(v) => `${(v / 1000).toFixed(1)}k`}
+          />
+        </div>
+      </div>
+    );
+  };
 
   const toggleMobileHeaderSection = (section: MobileHeaderSection) => {
     setMobileHeaderSection(section);
@@ -2455,18 +2808,43 @@ function App() {
       );
     }
 
-    return (
+    if (mobileHeaderSection === "fx") {
+      return (
         <div className="mobile-group-panel" id="mobile-header-panel">
-          <div className="mobile-group-actions mobile-group-actions-grid">
-            <button type="button" onClick={() => void runStorageAction("set-voices")}>
-              Voice number {lineCount}
-            </button>
-            <button type="button" onClick={() => void checkForAppUpdate()}>
-              Update
-            </button>
-            <button type="button" onClick={isFullscreen ? exitFullscreen : enterFullscreen}>
-              {isFullscreen ? "Exit Full" : "Full"}
-            </button>
+          <div className="settings-subsection">
+            <div className="settings-subsection-label">Effects</div>
+            <div className="settings-helper">Open an effect submenu to tweak its controls here.</div>
+            <div className="mobile-group-actions mobile-group-actions-grid fx-settings-grid">
+              {fxOptions.map((effect) => (
+                <button
+                  key={effect.key}
+                  type="button"
+                  aria-pressed={selectedFxMenu === effect.key}
+                  className={selectedFxMenu === effect.key ? "selected" : ""}
+                  onClick={() => setSelectedFxMenu(effect.key)}
+                >
+                  {effect.label}
+                </button>
+              ))}
+            </div>
+            {renderFxMenuControls()}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mobile-group-panel" id="mobile-header-panel">
+        <div className="mobile-group-actions mobile-group-actions-grid">
+          <button type="button" onClick={() => void runStorageAction("set-voices")}>
+            Voice number {lineCount}
+          </button>
+          <button type="button" onClick={() => void checkForAppUpdate()}>
+            Update
+          </button>
+          <button type="button" onClick={isFullscreen ? exitFullscreen : enterFullscreen}>
+            {isFullscreen ? "Exit Full" : "Full"}
+          </button>
           <button type="button" onClick={() => void runStorageAction("import-json")}>
             Import
           </button>
@@ -2815,6 +3193,16 @@ function App() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={mobileHeaderSection === "fx"}
+                className={mobileHeaderSection === "fx" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("fx")}
+                aria-controls="mobile-header-panel"
+              >
+                FX
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={mobileHeaderSection === "utilities"}
                 className={mobileHeaderSection === "utilities" ? "selected" : ""}
                 onClick={() => toggleMobileHeaderSection("utilities")}
@@ -3014,44 +3402,49 @@ function App() {
                   <div className="delay-divider" />
 
                   <div className="knob-grid fx-knobs">
-                    <div className="stack-control delay-sync-slot">
-                      <div className="stack-control-spacer" aria-hidden="true" />
-                      <div className="delay-sync-control">
-                        <button
-                          className={params.delaySync ? "selected" : ""}
-                          aria-label={params.delaySync ? "Switch delay to free time" : "Switch delay to synced time"}
-                          onClick={() => updateParams({ delaySync: !params.delaySync })}
-                        >
-                          {params.delaySync ? "S" : "F"}
-                        </button>
-                        <select
-                          aria-label="Delay subdivision"
-                          value={params.delaySubdivision}
-                          disabled={!params.delaySync}
-                          onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                        >
-                          {DELAY_SUBDIVISIONS.map((subdivision) => (
-                            <option key={subdivision.value} value={subdivision.value}>
-                              {subdivision.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <KnobControl
-                      label={synthLabels.delayTime}
-                      min={0.02}
-                      max={1}
-                      step={0.01}
-                      value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-                      disabled={params.delaySync}
-                      onChange={(v) => updateParams({ delayTime: v })}
-                      format={(v) => `${v.toFixed(2)}s`}
-                    />
-                    <KnobControl label={synthLabels.feedback} min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label={synthLabels.delayMix} min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label={synthLabels.reverb} min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label={synthLabels.distortion} min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                    {fxVisibility.delay ? (
+                      <>
+                        <div className="stack-control delay-sync-slot">
+                          <div className="stack-control-spacer" aria-hidden="true" />
+                          <div className="delay-sync-control">
+                            <button
+                              className={params.delaySync ? "selected" : ""}
+                              aria-label={params.delaySync ? "Switch delay to free time" : "Switch delay to synced time"}
+                              onClick={() => updateParams({ delaySync: !params.delaySync })}
+                            >
+                              {params.delaySync ? "S" : "F"}
+                            </button>
+                            <select
+                              aria-label="Delay subdivision"
+                              value={params.delaySubdivision}
+                              disabled={!params.delaySync}
+                              onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                            >
+                              {DELAY_SUBDIVISIONS.map((subdivision) => (
+                                <option key={subdivision.value} value={subdivision.value}>
+                                  {subdivision.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <KnobControl
+                          label={synthLabels.delayTime}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+                          disabled={params.delaySync}
+                          onChange={(v) => updateParams({ delayTime: v })}
+                          format={(v) => `${v.toFixed(2)}s`}
+                        />
+                        <KnobControl label={synthLabels.feedback} min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                        <KnobControl label={synthLabels.delayMix} min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                      </>
+                    ) : null}
+                    {fxVisibility.reverb ? <KnobControl label={synthLabels.reverb} min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} /> : null}
+                    {fxVisibility.overdrive ? <KnobControl label={synthLabels.overdrive} min={0} max={1} step={0.01} value={params.overdrive} onChange={(v) => updateParams({ overdrive: v })} format={(v) => `${Math.round(v * 100)}%`} /> : null}
+                    {fxVisibility.distortion ? <KnobControl label={synthLabels.distortion} min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} /> : null}
                     <div className="stack-control pattern-transpose-control" aria-label="Pattern transpose controls">
                       <div className="pattern-transpose-stack">
                         <button type="button" className="tempo-action-button" aria-label="Transpose pattern up" title="Transpose pattern up" onClick={() => transposeCurrentPattern(1)}>
@@ -3104,42 +3497,47 @@ function App() {
                   <div className="delay-divider" />
 
                   <div className="knob-grid fx-knobs">
-                    <div className="stack-control delay-sync-slot">
-                      <div className="stack-control-spacer" aria-hidden="true" />
-                      <div className="delay-sync-control">
-                        <button
-                          className={params.delaySync ? "selected" : ""}
-                          onClick={() => updateParams({ delaySync: !params.delaySync })}
-                        >
-                          {params.delaySync ? "SYNC" : "FREE"}
-                        </button>
-                        <select
-                          value={params.delaySubdivision}
-                          disabled={!params.delaySync}
-                          onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
-                        >
-                          {DELAY_SUBDIVISIONS.map((subdivision) => (
-                            <option key={subdivision.value} value={subdivision.value}>
-                              {subdivision.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <KnobControl
-                      label="Delay Time"
-                      min={0.02}
-                      max={1}
-                      step={0.01}
-                      value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
-                      disabled={params.delaySync}
-                      onChange={(v) => updateParams({ delayTime: v })}
-                      format={(v) => `${v.toFixed(2)}s`}
-                    />
-                    <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
-                    <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                    {fxVisibility.delay ? (
+                      <>
+                        <div className="stack-control delay-sync-slot">
+                          <div className="stack-control-spacer" aria-hidden="true" />
+                          <div className="delay-sync-control">
+                            <button
+                              className={params.delaySync ? "selected" : ""}
+                              onClick={() => updateParams({ delaySync: !params.delaySync })}
+                            >
+                              {params.delaySync ? "SYNC" : "FREE"}
+                            </button>
+                            <select
+                              value={params.delaySubdivision}
+                              disabled={!params.delaySync}
+                              onChange={(e) => updateParams({ delaySubdivision: e.currentTarget.value as DelaySubdivision })}
+                            >
+                              {DELAY_SUBDIVISIONS.map((subdivision) => (
+                                <option key={subdivision.value} value={subdivision.value}>
+                                  {subdivision.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <KnobControl
+                          label="Delay Time"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime}
+                          disabled={params.delaySync}
+                          onChange={(v) => updateParams({ delayTime: v })}
+                          format={(v) => `${v.toFixed(2)}s`}
+                        />
+                        <KnobControl label="Feedback" min={0} max={0.92} step={0.01} value={params.delayFeedback} onChange={(v) => updateParams({ delayFeedback: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                        <KnobControl label="Delay Mix" min={0} max={1} step={0.01} value={params.delayMix} onChange={(v) => updateParams({ delayMix: v })} format={(v) => `${Math.round(v * 100)}%`} />
+                      </>
+                    ) : null}
+                    {fxVisibility.reverb ? <KnobControl label="Reverb" min={0} max={1} step={0.01} value={params.reverb} onChange={(v) => updateParams({ reverb: v })} format={(v) => `${Math.round(v * 100)}%`} /> : null}
+                    {fxVisibility.overdrive ? <KnobControl label="Overdrive" min={0} max={1} step={0.01} value={params.overdrive} onChange={(v) => updateParams({ overdrive: v })} format={(v) => `${Math.round(v * 100)}%`} /> : null}
+                    {fxVisibility.distortion ? <KnobControl label="Distortion" min={0} max={1} step={0.01} value={params.distortion} onChange={(v) => updateParams({ distortion: v })} format={(v) => `${Math.round(v * 100)}%`} /> : null}
                     <div className="stack-control pattern-transpose-control" aria-label="Pattern transpose controls">
                       <div className="pattern-transpose-stack">
                         <button type="button" className="tempo-action-button" aria-label="Transpose pattern up" title="Transpose pattern up" onClick={() => transposeCurrentPattern(1)}>

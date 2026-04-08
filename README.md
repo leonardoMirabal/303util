@@ -179,7 +179,7 @@ Use the menu to reach the project options:
 - **Voices** to switch between 1, 2, or 3 voice projects
 - **Import** and **Export JSON**
 - **Export PNG**
-- **Drive / Backup** when Google Drive sync is configured
+- **Google Drive** to connect cloud sync, then **Backup** after connection
 
 Scale highlighting is visual guidance only. It helps you see matching notes, but it does not prevent entering notes outside the selected scale.
 
@@ -220,7 +220,7 @@ Use **Import** to load a project file back into the app. After importing, click 
 
 ### Google Drive backup
 
-If Google Drive sync is configured, the app can back up saved libraries and patterns. Save your pattern first if you want the latest edits included in backup data.
+Use **Google Drive** to connect cloud sync. After connection, the same area gives you **Backup** for manual backup runs. Save your pattern first if you want the latest edits included in backup data.
 
 ## Recommended workflow
 

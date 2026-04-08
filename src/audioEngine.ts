@@ -26,8 +26,15 @@ type EngineVoiceParams = {
   delaySubdivision: EngineDelaySubdivision;
   delayFeedback: number;
   delayMix: number;
+  delayTone: number;
+  overdrive: number;
+  overdriveTone: number;
   distortion: number;
+  distortionTone: number;
   reverb: number;
+  reverbTail: number;
+  reverbPreDelay: number;
+  reverbTone: number;
 };
 
 type EngineLine = {
@@ -40,22 +47,35 @@ type EngineLine = {
 export type AudioLineFx = {
   send: GainNode;
   dry: GainNode;
+  overdrive: WaveShaperNode;
+  overdriveTone: BiquadFilterNode;
+  overdriveWet: GainNode;
   delaySend: GainNode;
   delayWet: GainNode;
   delay: DelayNode;
+  delayTone: BiquadFilterNode;
   feedback: GainNode;
-  distSend: GainNode;
   distortion: WaveShaperNode;
+  distortionTone: BiquadFilterNode;
   distWet: GainNode;
   reverbSend: GainNode;
+  reverbPreDelay: DelayNode;
+  reverbTone: BiquadFilterNode;
   reverb: ConvolverNode;
   reverbWet: GainNode;
   lastDelayTime: number;
   lastFeedbackAmount: number;
   lastDelayMixAmount: number;
+  lastDelayTone: number;
   lastDelayRouteAmount: number;
+  lastOverdriveAmount: number;
+  lastOverdriveTone: number;
   lastDistortionAmount: number;
+  lastDistortionTone: number;
   lastReverbAmount: number;
+  lastReverbTail: number;
+  lastReverbPreDelay: number;
+  lastReverbTone: number;
 };
 
 const PITCHES = ["B3", "A#3", "A3", "G#3", "G3", "F#3", "F3", "E3", "D#3", "D3", "C#3", "C3"] as const;
@@ -100,7 +120,19 @@ const PLAYED_NOTE_FREQUENCY: Record<string, Record<EngineTranspose, number>> = O
   ]),
 ) as Record<string, Record<EngineTranspose, number>>;
 
+const OVERDRIVE_CURVE_CACHE = new Map<number, Float32Array>();
 const DISTORTION_CURVE_CACHE = new Map<number, Float32Array>();
+
+const makeOverdriveCurve = (amount: number) => {
+  const samples = 256;
+  const curve = new Float32Array(samples);
+  const drive = 1 + amount * 12;
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i * 2) / (samples - 1) - 1;
+    curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
+  }
+  return curve;
+};
 
 const makeDistortionCurve = (amount: number) => {
   const samples = 256;
@@ -113,6 +145,15 @@ const makeDistortionCurve = (amount: number) => {
   return curve;
 };
 
+const getOverdriveCurve = (amount: number): Float32Array => {
+  const cacheKey = Math.round(amount * 500);
+  const cached = OVERDRIVE_CURVE_CACHE.get(cacheKey);
+  if (cached) return cached;
+  const curve = makeOverdriveCurve(cacheKey / 500);
+  OVERDRIVE_CURVE_CACHE.set(cacheKey, curve);
+  return curve;
+};
+
 const getDistortionCurve = (amount: number): Float32Array => {
   const cacheKey = Math.round(amount * 500);
   const cached = DISTORTION_CURVE_CACHE.get(cacheKey);
@@ -122,17 +163,28 @@ const getDistortionCurve = (amount: number): Float32Array => {
   return curve;
 };
 
-const makeImpulseResponse = (ctx: AudioContext) => {
-  const duration = 1.2;
+const REVERB_IMPULSE_CACHE = new Map<number, AudioBuffer>();
+
+const makeImpulseResponse = (ctx: AudioContext, duration: number) => {
   const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
   const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
   for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
     const data = impulse.getChannelData(channel);
     for (let i = 0; i < length; i += 1) {
-      const decay = (1 - i / length) ** 2.2;
+      const decay = (1 - i / length) ** 1.8;
       data[i] = (Math.random() * 2 - 1) * decay;
     }
   }
+  return impulse;
+};
+
+const getImpulseResponse = (ctx: AudioContext, duration: number): AudioBuffer => {
+  const normalizedDuration = Math.min(4, Math.max(0.4, duration));
+  const cacheKey = Math.round(normalizedDuration * 10);
+  const cached = REVERB_IMPULSE_CACHE.get(cacheKey);
+  if (cached) return cached;
+  const impulse = makeImpulseResponse(ctx, cacheKey / 10);
+  REVERB_IMPULSE_CACHE.set(cacheKey, impulse);
   return impulse;
 };
 
@@ -160,7 +212,7 @@ export const ensureAudioGraph = (
     master.connect(ctx.destination);
     audioRef.current = ctx;
     masterRef.current = master;
-    reverbBufferRef.current = makeImpulseResponse(ctx);
+    reverbBufferRef.current = getImpulseResponse(ctx, 2.0);
   }
   if (typeof lineIndex === "number" && !lineFxRef.current[lineIndex]) {
     const ctx = audioRef.current;
@@ -168,43 +220,61 @@ export const ensureAudioGraph = (
     if (!ctx || !master) return null;
     const send = ctx.createGain();
     const dry = ctx.createGain();
+    const overdrive = ctx.createWaveShaper();
+    const overdriveTone = ctx.createBiquadFilter();
+    const overdriveWet = ctx.createGain();
     const delaySend = ctx.createGain();
     const delayWet = ctx.createGain();
     const delay = ctx.createDelay(1.0);
+    const delayTone = ctx.createBiquadFilter();
     const feedback = ctx.createGain();
-    const distSend = ctx.createGain();
     const distortion = ctx.createWaveShaper();
+    const distortionTone = ctx.createBiquadFilter();
     const distWet = ctx.createGain();
     const reverbSend = ctx.createGain();
+    const reverbPreDelay = ctx.createDelay(0.2);
+    const reverbTone = ctx.createBiquadFilter();
     const reverb = ctx.createConvolver();
     const reverbWet = ctx.createGain();
 
     send.connect(dry);
     dry.connect(master);
-    send.connect(distSend);
-    distSend.connect(distortion);
-    distortion.connect(distWet);
+    send.connect(overdrive);
+    overdrive.connect(overdriveTone);
+    overdriveTone.connect(overdriveWet);
+    overdriveWet.connect(master);
+    overdriveTone.connect(distortion);
+    distortion.connect(distortionTone);
+    distortionTone.connect(distWet);
     distWet.connect(master);
-    distortion.connect(delaySend);
+    distortionTone.connect(delaySend);
 
     delaySend.connect(delay);
     delay.connect(feedback);
     feedback.connect(delay);
-    delay.connect(delayWet);
+    delay.connect(delayTone);
+    delayTone.connect(delayWet);
     delayWet.connect(master);
 
-    delay.connect(reverbSend);
-    reverbSend.connect(reverb);
+    delayTone.connect(reverbSend);
+    reverbSend.connect(reverbPreDelay);
+    reverbPreDelay.connect(reverbTone);
+    reverbTone.connect(reverb);
     reverb.connect(reverbWet);
     reverbWet.connect(master);
 
+    overdrive.oversample = "2x";
     distortion.oversample = "4x";
+    overdriveTone.type = "lowpass";
+    distortionTone.type = "lowpass";
+    delayTone.type = "lowpass";
+    reverbTone.type = "lowpass";
     reverb.buffer = reverbBufferRef.current;
     dry.gain.value = 1;
+    overdriveWet.gain.value = 0;
     delaySend.gain.value = 0;
     delayWet.gain.value = 0;
     feedback.gain.value = 0;
-    distSend.gain.value = 1;
     distWet.gain.value = 0;
     reverbSend.gain.value = 0;
     reverbWet.gain.value = 0;
@@ -212,22 +282,35 @@ export const ensureAudioGraph = (
     lineFxRef.current[lineIndex] = {
       send,
       dry,
+      overdrive,
+      overdriveTone,
+      overdriveWet,
       delaySend,
       delayWet,
       delay,
+      delayTone,
       feedback,
-      distSend,
       distortion,
+      distortionTone,
       distWet,
       reverbSend,
+      reverbPreDelay,
+      reverbTone,
       reverb,
       reverbWet,
       lastDelayTime: Number.NaN,
       lastFeedbackAmount: Number.NaN,
       lastDelayMixAmount: Number.NaN,
+      lastDelayTone: Number.NaN,
       lastDelayRouteAmount: Number.NaN,
+      lastOverdriveAmount: -1,
+      lastOverdriveTone: Number.NaN,
       lastDistortionAmount: -1,
+      lastDistortionTone: Number.NaN,
       lastReverbAmount: Number.NaN,
+      lastReverbTail: Number.NaN,
+      lastReverbPreDelay: Number.NaN,
+      lastReverbTone: Number.NaN,
     };
   }
   return { ctx: audioRef.current };
@@ -328,7 +411,7 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   };
 
   const delayTime = params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime;
-  const nextDelayTime = Math.min(1, Math.max(0.02, delayTime));
+  const nextDelayTime = Math.min(1, Math.max(0, delayTime));
   if (audioParamChanged(fx.lastDelayTime, nextDelayTime, 0.0005)) {
     fx.delay.delayTime.setValueAtTime(nextDelayTime, now);
     fx.lastDelayTime = nextDelayTime;
@@ -343,17 +426,53 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
     fx.delayWet.gain.setValueAtTime(delayMixAmount, now);
     fx.lastDelayMixAmount = delayMixAmount;
   }
+  const delayToneFrequency = Math.min(12000, Math.max(800, params.delayTone));
+  if (audioParamChanged(fx.lastDelayTone, delayToneFrequency, 40)) {
+    fx.delayTone.frequency.setValueAtTime(delayToneFrequency, now);
+    fx.lastDelayTone = delayToneFrequency;
+  }
+  const overdriveAmount = Math.min(1, Math.max(0, params.overdrive));
+  if (Math.abs(fx.lastOverdriveAmount - overdriveAmount) > 0.002) {
+    fx.overdrive.curve = overdriveAmount <= 0.002 ? null : getOverdriveCurve(overdriveAmount);
+    fx.overdriveWet.gain.setValueAtTime(overdriveAmount, now);
+    fx.lastOverdriveAmount = overdriveAmount;
+  }
+  const overdriveToneFrequency = Math.min(14000, Math.max(800, params.overdriveTone));
+  if (audioParamChanged(fx.lastOverdriveTone, overdriveToneFrequency, 40)) {
+    fx.overdriveTone.frequency.setValueAtTime(overdriveToneFrequency, now);
+    fx.lastOverdriveTone = overdriveToneFrequency;
+  }
   const distortionAmount = Math.min(1, Math.max(0, params.distortion));
   if (Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
     fx.distortion.curve = distortionAmount <= 0.002 ? null : getDistortionCurve(distortionAmount);
     fx.distWet.gain.setValueAtTime(distortionAmount, now);
     fx.lastDistortionAmount = distortionAmount;
   }
+  const distortionToneFrequency = Math.min(14000, Math.max(800, params.distortionTone));
+  if (audioParamChanged(fx.lastDistortionTone, distortionToneFrequency, 40)) {
+    fx.distortionTone.frequency.setValueAtTime(distortionToneFrequency, now);
+    fx.lastDistortionTone = distortionToneFrequency;
+  }
   const reverbAmount = Math.min(1, Math.max(0, params.reverb));
+  const reverbTail = Math.min(4, Math.max(0.4, params.reverbTail));
+  const reverbPreDelay = Math.min(0.18, Math.max(0, params.reverbPreDelay));
+  const reverbToneFrequency = Math.min(12000, Math.max(800, params.reverbTone));
   const delayRouteAmount = Math.max(delayMixAmount, reverbAmount);
   if (audioParamChanged(fx.lastDelayRouteAmount, delayRouteAmount)) {
     fx.delaySend.gain.setValueAtTime(delayRouteAmount, now);
     fx.lastDelayRouteAmount = delayRouteAmount;
+  }
+  if (audioParamChanged(fx.lastReverbTail, reverbTail, 0.05)) {
+    fx.reverb.buffer = getImpulseResponse(ctx, reverbTail);
+    fx.lastReverbTail = reverbTail;
+  }
+  if (audioParamChanged(fx.lastReverbPreDelay, reverbPreDelay, 0.002)) {
+    fx.reverbPreDelay.delayTime.setValueAtTime(reverbPreDelay, now);
+    fx.lastReverbPreDelay = reverbPreDelay;
+  }
+  if (audioParamChanged(fx.lastReverbTone, reverbToneFrequency, 40)) {
+    fx.reverbTone.frequency.setValueAtTime(reverbToneFrequency, now);
+    fx.lastReverbTone = reverbToneFrequency;
   }
   if (audioParamChanged(fx.lastReverbAmount, reverbAmount)) {
     fx.reverbSend.gain.setValueAtTime(reverbAmount, now);
