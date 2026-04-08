@@ -2061,7 +2061,6 @@ function App() {
     const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
     const targetLibraryId = selectedLibraryId;
     const targetName = programName.trim() || selectedPattern?.name || "Pattern";
-    const nameMatch = patterns.find((pattern) => pattern.libraryId === targetLibraryId && pattern.name === targetName);
 
     if (!selectedPattern) {
       setNewPatternModalMode("save");
@@ -2073,29 +2072,12 @@ function App() {
       return;
     }
 
-    if (targetName === selectedPattern.name) {
-      await savePatternRecord({
-        patternId: selectedPattern.id,
-        libraryId: targetLibraryId,
-        name: selectedPattern.name,
-        createdAt: selectedPattern.createdAt,
-      });
-      return;
-    }
-
-    if (nameMatch && nameMatch.id !== selectedPattern.id) {
-      const ok = window.confirm(`Pattern "${targetName}" already exists in this lib. Overwrite it?`);
-      if (!ok) return;
-      await savePatternRecord({
-        patternId: nameMatch.id,
-        libraryId: targetLibraryId,
-        name: targetName,
-        createdAt: nameMatch.createdAt,
-      });
-      return;
-    }
-
-    await savePatternRecord({ libraryId: targetLibraryId, name: targetName });
+    await savePatternRecord({
+      patternId: selectedPattern.id,
+      libraryId: targetLibraryId,
+      name: targetName,
+      createdAt: selectedPattern.createdAt,
+    });
   };
 
   const createEmptyPattern = async (patternName: string, libraryId = selectedLibraryId) => {
@@ -2374,7 +2356,20 @@ function App() {
   };
 
   const resetPattern = () => {
-    openUnsavedEmptyPattern(selectedLibraryId);
+    const blankProject = blankProjectState();
+    const currentPattern = patterns.find((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
+    setIsPlaying(false);
+    resetPlaybackState();
+    setWorkspaceView("editor");
+    setSelectedLibraryId(currentPattern?.libraryId ?? selectedLibraryId);
+    setSelectedPatternId(currentPattern?.id ?? selectedPatternId);
+    setProgramName(currentPattern?.name ?? programName);
+    setLineCount(blankProject.lineCount);
+    setScalePresetId(blankProject.scalePresetId ?? "off");
+    setScaleRoot(blankProject.scaleRoot ?? "C");
+    setProjectTempo(blankProject.tempo);
+    setSelectedLine(blankProject.selectedLine);
+    setLines(blankProject.lines);
   };
 
   const initCurrentPattern = () => {
@@ -2427,6 +2422,17 @@ function App() {
   const patternLength = clampPatternLength(lines[selectedLine].patternLength, selectedTimingMode);
   const visiblePatterns = patterns.filter((pattern) => pattern.libraryId === selectedLibraryId);
   const selectedSavedPattern = visiblePatterns.find((pattern) => pattern.id === selectedPatternId);
+  const savedPatternSnapshot = (() => {
+    if (!selectedSavedPattern) return null;
+    try {
+      const raw = typeof selectedSavedPattern.project === "string" ? JSON.parse(selectedSavedPattern.project) : selectedSavedPattern.project;
+      return validateProjectData(raw);
+    } catch {
+      return null;
+    }
+  })();
+  const hasUnsavedChanges =
+    !savedPatternSnapshot || JSON.stringify(buildProjectSnapshot()) !== JSON.stringify(savedPatternSnapshot);
   const pickerPatterns = patterns.filter((pattern) => pattern.libraryId === pickerLibraryId);
   const shouldShowRotateOverlay = false;
   const controlsToggleLabel = "Controls";
@@ -2436,7 +2442,7 @@ function App() {
   const scaleEnabled = scalePresetId !== "off";
   const currentLibraryLabel = libraries.find((library) => library.id === selectedLibraryId)?.name ?? "Library";
   const currentPatternName = programName.trim() || selectedSavedPattern?.name || "Untitled";
-  const currentPatternLabel = `${currentLibraryLabel} > ${currentPatternName}`;
+  const currentPatternLabel = `${currentLibraryLabel} > ${currentPatternName}${hasUnsavedChanges ? " *" : ""}`;
   const fxOptions: Array<{ key: keyof FxVisibilitySettings; label: string }> = [
     { key: "delay", label: "Delay" },
     { key: "reverb", label: "Reverb" },
@@ -2919,7 +2925,7 @@ function App() {
             </div>
             <div className="mobile-group-panel update-dialog-body">
               <p className="update-dialog-message">Reset this pattern and wipe its current settings?</p>
-              <p className="update-dialog-note">This opens a fresh unsaved blank pattern in the current library.</p>
+              <p className="update-dialog-note">This keeps the current pattern and resets its steps, controls, and modes to the init defaults.</p>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={() => setIsInitDialogOpen(false)}>

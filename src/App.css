@@ -1201,8 +1201,9 @@ button.selected {
 }
 
 .cell.scale-root {
-  background: #14181d;
-  border-color: #252a31;
+  background: #2a1719;
+  border-color: #6e383d;
+  color: #f0c8cb;
 }
 
 .cell.note {
