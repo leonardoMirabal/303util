@@ -417,7 +417,7 @@ const BLANK_PROJECT_TEMPLATE: ProjectData = (() => {
     version: 1,
     programName: DEFAULT_UNSAVED_PATTERN_NAME,
     lineCount: 3,
-    scalePresetId: "off",
+    scalePresetId: "harmonic-minor",
     scaleRoot: "C",
     tempo: 94,
     selectedLine: 0,
@@ -1178,6 +1178,7 @@ function App() {
     }
   }, [libraries, selectedLibraryId]);
   useEffect(() => {
+    if (!selectedPatternId) return;
     if (patterns.length === 0) return;
     const stillValid = patterns.some((pattern) => pattern.id === selectedPatternId && pattern.libraryId === selectedLibraryId);
     if (!stillValid) {

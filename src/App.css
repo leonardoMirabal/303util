@@ -2050,13 +2050,13 @@ button.selected {
   }
 
   .lane-time {
-    gap: 0;
+    gap: 1px;
   }
 
   .lane-time button {
     min-height: 0;
-    padding: 0;
-    font-size: 0.44rem;
+    padding: 0 1px;
+    font-size: 0.48rem;
     line-height: 1;
   }
 
@@ -2067,14 +2067,14 @@ button.selected {
   }
 
   .top-lanes .lane-row {
-    min-height: 11px;
+    min-height: 15px;
   }
 
   .top-lanes .lane-time button,
   .top-lanes .lane-cell,
   .top-lanes .lane-label {
-    min-height: 11px;
-    max-height: 11px;
+    min-height: 15px;
+    max-height: 15px;
   }
 
   .top-lanes .lane-label {
@@ -2089,14 +2089,23 @@ button.selected {
   }
 
   .top-lanes .lane-time {
-    height: 11px;
+    height: 15px;
   }
 
   .top-lanes .lane-time button {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.52rem;
+    font-size: 0.58rem;
+  }
+
+  .top-lanes .lane-cell {
+    font-size: 0.54rem;
+  }
+
+  .top-lanes .lane-label {
+    padding-inline: 3px;
+    font-size: 0.5rem;
   }
 }
 
