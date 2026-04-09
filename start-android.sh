@@ -92,6 +92,11 @@ refresh_android_project() {
   echo "Recreating Android project..."
   rm -rf "${SCRIPT_DIR}/src-tauri/gen/android"
   npx tauri android init --ci --skip-targets-install
+
+  if [ -d "${SCRIPT_DIR}/src-tauri/icons/android" ]; then
+    echo "Syncing Android launcher resources into generated project..."
+    cp -R "${SCRIPT_DIR}/src-tauri/icons/android/." "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res/"
+  fi
 }
 
 if [ ! -d "${EXPECTED_ANDROID_PACKAGE_DIR}" ]; then
@@ -140,10 +145,12 @@ adb devices
 
 DEVICE_SERIAL="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
 
-if adb -s "${DEVICE_SERIAL}" shell pm list packages "${APP_IDENTIFIER}" | grep -Fq "package:${APP_IDENTIFIER}"; then
-  echo "Uninstalling existing app ${APP_IDENTIFIER} from ${DEVICE_SERIAL}..."
-  adb -s "${DEVICE_SERIAL}" uninstall "${APP_IDENTIFIER}"
-fi
+for package_name in "${APP_IDENTIFIER}" "com.app.app"; do
+  if adb -s "${DEVICE_SERIAL}" shell pm list packages "${package_name}" | grep -Fq "package:${package_name}"; then
+    echo "Uninstalling existing app ${package_name} from ${DEVICE_SERIAL}..."
+    adb -s "${DEVICE_SERIAL}" uninstall "${package_name}"
+  fi
+done
 
 DEFAULT_ANDROID_CARGO_TARGET_DIR="${HOME}/Library/Caches/303util/cargo-target-android-dev"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${DEFAULT_ANDROID_CARGO_TARGET_DIR}}"

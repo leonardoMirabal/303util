@@ -206,6 +206,10 @@ npx tauri icon "${ICON_SOURCE_FILE}" -o "${SCRIPT_DIR}/src-tauri/icons"
 echo "Reinitializing Android project to refresh generated launcher icons..."
 rm -rf "${SCRIPT_DIR}/src-tauri/gen/android"
 npx tauri android init --ci --skip-targets-install
+if [ -d "${SCRIPT_DIR}/src-tauri/icons/android" ]; then
+  echo "Syncing Android launcher resources into generated project..."
+  cp -R "${SCRIPT_DIR}/src-tauri/icons/android/." "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res/"
+fi
 
 enforce_android_landscape
 write_android_version_properties
