@@ -330,7 +330,7 @@ const ampContour = (params: EngineVoiceParams, accented: boolean) => {
 };
 
 const filterHoldTime = (gateSeconds: number): number => Math.max(0.025, gateSeconds * 0.18);
-const slideSecondsForParams = (params: EngineVoiceParams): number => clamp(0.08 + params.decay * 0.08, 0.08, 0.12);
+const slideSecondsForParams = (params: EngineVoiceParams): number => clamp(0.11 + params.decay * 0.1, 0.11, 0.16);
 
 const setVoiceWaveform = (voice: AudioLineVoice, waveform: OscillatorType) => {
   const nextWaveform = voiceWaveformForParams(waveform);
@@ -809,6 +809,7 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
 
   let ctx = audioRef.current;
   let fx = lineFxRef.current[lineIndex];
+  const hadFx = !!fx;
   if (!ctx || !fx) {
     const graph = ensureAudioGraph(audioRef, masterRef, reverbBufferRef, lineFxRef, lineIndex);
     if (!graph) return;
@@ -818,16 +819,18 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   if (!fx) return;
 
   const now = startTime ?? ctx.currentTime;
-  syncLineAudioState({
-    lineIndex,
-    params,
-    tempo,
-    audioRef,
-    masterRef,
-    reverbBufferRef,
-    lineFxRef,
-    atTime: now,
-  });
+  if (!hadFx) {
+    syncLineAudioState({
+      lineIndex,
+      params,
+      tempo,
+      audioRef,
+      masterRef,
+      reverbBufferRef,
+      lineFxRef,
+      atTime: now,
+    });
+  }
 
   const voice = fx.voice;
   setVoiceWaveform(voice, params.waveform);
@@ -854,8 +857,8 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   if (isSlideStep) {
     const slideSeconds = slideSecondsForParams(params);
     const slideArrivalTime = now + slideSeconds;
-    const slideFilterTarget = clamp(filter.base + (step.accent ? 120 : 0), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
-    const slideGainTarget = Math.max(0.00001, amp.peak * (step.accent ? 0.98 : 0.86));
+    const slideFilterTarget = clamp(filter.base + (step.accent ? 180 : 60), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
+    const slideGainTarget = Math.max(0.00001, amp.peak * (step.accent ? 1.02 : 0.92));
     holdAudioParam(voice.oscillator.frequency, now);
     const fromFrequency = Math.max(1, voice.lastFrequency || freq);
     voice.oscillator.frequency.setValueAtTime(fromFrequency, now);

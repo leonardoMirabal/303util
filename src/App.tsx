@@ -762,6 +762,8 @@ const VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS = 0.2;
 const HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS = 2.2;
 const VISIBLE_SCHEDULER_INTERVAL_MS = 25;
 const HIDDEN_SCHEDULER_INTERVAL_MS = 250;
+const ANDROID_TAURI_SCHEDULER_LOOKAHEAD_SECONDS = 0.45;
+const ANDROID_TAURI_SCHEDULER_INTERVAL_MS = 45;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -1336,8 +1338,11 @@ function App() {
     resetPlaybackState();
     const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
     const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
+    const visibleLookaheadSeconds = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_LOOKAHEAD_SECONDS : VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
+    const visibleSchedulerIntervalMs = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_INTERVAL_MS : VISIBLE_SCHEDULER_INTERVAL_MS;
     const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
       if (lineIndex !== selectedLineRef.current) return;
+      if (isAndroidTauriApp) return;
       const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
       if (delayMs <= 8) {
         setPlayheadValue(stepIndex);
@@ -1356,7 +1361,7 @@ function App() {
       if (!ctx) return;
       const currentTime = ctx.currentTime;
       const isHidden = document.visibilityState === "hidden";
-      const scheduleUntil = currentTime + (isHidden ? HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS : VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS);
+      const scheduleUntil = currentTime + (isHidden ? HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS : visibleLookaheadSeconds);
       const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
         const line = linesNow[li];
@@ -1378,7 +1383,7 @@ function App() {
         }
         nextStepTimeRef.current[li] = nextStepTime;
       }
-      timerRef.current = window.setTimeout(tick, isHidden ? HIDDEN_SCHEDULER_INTERVAL_MS : VISIBLE_SCHEDULER_INTERVAL_MS);
+      timerRef.current = window.setTimeout(tick, isHidden ? HIDDEN_SCHEDULER_INTERVAL_MS : visibleSchedulerIntervalMs);
     };
     tick();
     return () => {
@@ -1388,7 +1393,7 @@ function App() {
       }
       clearScheduledPlayheadUpdates();
     };
-  }, [isPlaying, tempo]);
+  }, [isAndroidTauriApp, isPlaying, tempo]);
 
   useEffect(() => {
     if (isPlaying) return;
