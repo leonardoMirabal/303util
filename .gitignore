@@ -1,3 +1,9 @@
 node_modules
 dist
 TODO.md
+artifacts/**
+artifacts
+src-tauri/target-android-dev/aarch64-linux-android/**
+src-tauri/target-android-dev/aarch64-linux-android
+src-tauri/target-android-dev/debug
+src-tauri/target-android-dev/debug/**

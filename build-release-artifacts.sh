@@ -113,13 +113,11 @@ resolve_apksigner() {
   fi
 
   local sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
-  mapfile -t apksigner_candidates < <(find "${sdk_root}/build-tools" -type f -name apksigner 2>/dev/null | sort -Vr)
-  if [ "${#apksigner_candidates[@]}" -eq 0 ]; then
+  ANDROID_APKSIGNER="$(find "${sdk_root}/build-tools" -type f -name apksigner 2>/dev/null | sort -Vr | head -n 1)"
+  if [ -z "${ANDROID_APKSIGNER}" ]; then
     echo "Error: apksigner was not found."
     exit 1
   fi
-
-  ANDROID_APKSIGNER="${apksigner_candidates[0]}"
 }
 
 configure_android_signing() {
@@ -206,7 +204,10 @@ write_android_version_properties
 configure_android_signing
 npx tauri android build "${ANDROID_BUILD_ARGS[@]}"
 
-mapfile -t apk_files < <(find "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk" -type f -name "*.apk" | sort)
+apk_files=()
+while IFS= read -r apk_file; do
+  apk_files+=("${apk_file}")
+done < <(find "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk" -type f -name "*.apk" | sort)
 
 if [ "${#apk_files[@]}" -eq 0 ]; then
   echo "Error: No APK files were generated."

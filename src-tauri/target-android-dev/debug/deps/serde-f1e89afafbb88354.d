@@ -1,0 +1,14 @@
+/Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/deps/serde-f1e89afafbb88354.d: /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/build/serde-51d71412165d9c1f/out/private.rs
+
+/Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/deps/libserde-f1e89afafbb88354.rlib: /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/build/serde-51d71412165d9c1f/out/private.rs
+
+/Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/deps/libserde-f1e89afafbb88354.rmeta: /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/build/serde-51d71412165d9c1f/out/private.rs
+
+/Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/build/serde-51d71412165d9c1f/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/leo/Desktop/dev/303/303util/src-tauri/target-android-dev/debug/build/serde-51d71412165d9c1f/out

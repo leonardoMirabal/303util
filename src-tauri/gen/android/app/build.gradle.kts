@@ -14,7 +14,7 @@ val tauriProperties = Properties().apply {
     }
 }
 
-setProperty("archivesBaseName", "303util")
+setProperty("archivesBaseName", "app")
 
 android {
     compileSdk = 36

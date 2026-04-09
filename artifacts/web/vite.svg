@@ -1,0 +1,17 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f2f2f2"></stop>
+      <stop offset="100%" stop-color="#cfcfcf"></stop>
+    </radialGradient>
+  </defs>
+
+  <!-- Fondo -->
+  <rect width="512" height="512" fill="#111111"></rect>
+
+  <!-- Knob -->
+  <circle cx="256" cy="256" r="160" fill="url(#grad)"></circle>
+
+  <!-- Indicador -->
+  <line x1="256" y1="256" x2="350" y2="160" stroke="#222222" stroke-width="16" stroke-linecap="round"></line>
+</svg>
