@@ -162,18 +162,14 @@ const PLAYED_NOTE_FREQUENCY: Record<string, Record<EngineTranspose, number>> = O
 const OVERDRIVE_CURVE_CACHE = new Map<number, Float32Array>();
 const DISTORTION_CURVE_CACHE = new Map<number, Float32Array>();
 const REVERB_IMPULSE_CACHE = new Map<number, AudioBuffer>();
+const ENABLE_WORKLET_VOICE = false;
 const WORKLET_PROCESSOR_NAME = "tb303-voice";
 const WORKLET_MODULE_PATH = `${import.meta.env.BASE_URL}audio/tb303-voice-worklet.js`;
 const WORKLET_READY_CONTEXTS = new WeakSet<AudioContext>();
 const WORKLET_FAILED_CONTEXTS = new WeakSet<AudioContext>();
 const WORKLET_LOADING_CONTEXTS = new WeakMap<AudioContext, Promise<boolean>>();
 
-const isLowPowerAudioDevice = (): boolean => {
-  if (typeof window === "undefined") return false;
-  const compactViewport = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 980px)").matches : false;
-  const mobileUserAgent = /\b(Android|iPhone|iPad|iPod|Mobile)\b/i.test(window.navigator.userAgent);
-  return compactViewport || mobileUserAgent;
-};
+const isLowPowerAudioDevice = (): boolean => false;
 
 const supportsAudioWorklet = (): boolean =>
   typeof AudioWorkletNode !== "undefined" && typeof window !== "undefined" && !!window.AudioContext;
@@ -509,7 +505,7 @@ export const ensureAudioGraph = (
   }
   const ctx = audioRef.current;
   if (!ctx) return null;
-  const shouldWaitForWorklet = supportsAudioWorklet() && !WORKLET_READY_CONTEXTS.has(ctx) && !WORKLET_FAILED_CONTEXTS.has(ctx);
+  const shouldWaitForWorklet = ENABLE_WORKLET_VOICE && supportsAudioWorklet() && !WORKLET_READY_CONTEXTS.has(ctx) && !WORKLET_FAILED_CONTEXTS.has(ctx);
   if (shouldWaitForWorklet && !WORKLET_LOADING_CONTEXTS.has(ctx)) {
     void ensureWorkletModule(ctx);
   }
@@ -520,7 +516,7 @@ export const ensureAudioGraph = (
     const send = ctx.createGain();
     const dry = ctx.createGain();
     const output = ctx.createGain();
-    const voice = WORKLET_READY_CONTEXTS.has(ctx) ? makeWorkletVoice(ctx, send, lowPower) : makeNodeVoice(ctx, send, lowPower);
+    const voice = ENABLE_WORKLET_VOICE && WORKLET_READY_CONTEXTS.has(ctx) ? makeWorkletVoice(ctx, send, lowPower) : makeNodeVoice(ctx, send, lowPower);
 
     send.connect(dry);
     dry.connect(output);
@@ -640,6 +636,7 @@ export const prepareAudioGraph = async (
   const graph = ensureAudioGraph(audioRef, masterRef, reverbBufferRef, { current: [] });
   const ctx = graph?.ctx ?? audioRef.current;
   if (!ctx) return null;
+  if (!ENABLE_WORKLET_VOICE) return { ctx };
   await ensureWorkletModule(ctx);
   return { ctx };
 };

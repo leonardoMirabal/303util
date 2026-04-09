@@ -175,6 +175,47 @@ body {
   color: #c7d0da;
 }
 
+.debug-metrics-panel {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(171 181 192 / 26%);
+}
+
+.debug-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.debug-metric-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #5b6672;
+  border-radius: 8px;
+  background: #394049;
+}
+
+.debug-metric-label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #c7d0da;
+  text-transform: uppercase;
+}
+
+.debug-metric-value {
+  font-size: 1rem;
+  line-height: 1;
+  color: #f7fafc;
+}
+
+.debug-metric-detail {
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #c7d0da;
+}
+
 .fx-settings-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -1875,6 +1916,33 @@ button.selected {
 
   .settings-subsection-label {
     font-size: 0.56rem;
+  }
+
+  .debug-metrics-panel {
+    padding-top: 4px;
+  }
+
+  .debug-metrics-grid {
+    gap: 4px;
+  }
+
+  .debug-metric-card {
+    gap: 2px;
+    padding: 4px;
+    border-radius: 6px;
+  }
+
+  .debug-metric-label {
+    font-size: 0.5rem;
+  }
+
+  .debug-metric-value {
+    font-size: 0.72rem;
+  }
+
+  .debug-metric-detail {
+    font-size: 0.52rem;
+    line-height: 1.2;
   }
 
   .mobile-google-sync-status {

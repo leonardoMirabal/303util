@@ -135,6 +135,28 @@ type DriveBackupPayload = {
   patterns: PatternRecord[];
 };
 
+type DebugMetricsState = {
+  cpuPercent: number;
+  cpuDetail: string;
+  memoryLabel: string;
+  memoryDetail: string;
+};
+
+type PerformanceMemoryInfo = {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+  jsHeapSizeLimit: number;
+};
+
+type PerformanceWithDebugMemory = Performance & {
+  memory?: PerformanceMemoryInfo;
+  measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }>;
+};
+
+type NavigatorWithDeviceMemory = Navigator & {
+  deviceMemory?: number;
+};
+
 type GoogleTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -762,8 +784,6 @@ const VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS = 0.2;
 const HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS = 2.2;
 const VISIBLE_SCHEDULER_INTERVAL_MS = 25;
 const HIDDEN_SCHEDULER_INTERVAL_MS = 250;
-const ANDROID_TAURI_SCHEDULER_LOOKAHEAD_SECONDS = 0.45;
-const ANDROID_TAURI_SCHEDULER_INTERVAL_MS = 45;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -796,6 +816,20 @@ const getLatestUpdatedAt = (libraries: LibraryRecord[], patterns: PatternRecord[
 };
 
 const clampTempo = (value: number): number => Math.min(MAX_TEMPO, Math.max(MIN_TEMPO, Math.round(value)));
+const formatBytes = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const decimals = value >= 100 || unitIndex === 0 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+};
+
+const formatDeviceMemory = (gigabytes: number): string => `${Number.isInteger(gigabytes) ? gigabytes.toFixed(0) : gigabytes.toFixed(1)} GB`;
 
 const lineHasPatternContent = (line: LineState): boolean => {
   const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
@@ -858,6 +892,12 @@ function App() {
   const [isInitDialogOpen, setIsInitDialogOpen] = useState(false);
   const [fxVisibility, setFxVisibility] = useState<FxVisibilitySettings>(() => loadFxVisibilitySettings());
   const [selectedFxMenu, setSelectedFxMenu] = useState<FxMenuSection>("delay");
+  const [debugMetrics, setDebugMetrics] = useState<DebugMetricsState>({
+    cpuPercent: 0,
+    cpuDetail: "Main-thread load estimate.",
+    memoryLabel: "Unavailable",
+    memoryDetail: "Browser memory details are not exposed here.",
+  });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -1342,11 +1382,10 @@ function App() {
       resetPlaybackState();
       const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
       const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
-      const visibleLookaheadSeconds = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_LOOKAHEAD_SECONDS : VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
-      const visibleSchedulerIntervalMs = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_INTERVAL_MS : VISIBLE_SCHEDULER_INTERVAL_MS;
+      const visibleLookaheadSeconds = VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
+      const visibleSchedulerIntervalMs = VISIBLE_SCHEDULER_INTERVAL_MS;
       const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
         if (lineIndex !== selectedLineRef.current) return;
-        if (isAndroidTauriApp) return;
         const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
         if (delayMs <= 8) {
           setPlayheadValue(stepIndex);
@@ -1400,7 +1439,7 @@ function App() {
       }
       clearScheduledPlayheadUpdates();
     };
-  }, [isAndroidTauriApp, isPlaying, tempo]);
+  }, [isPlaying, tempo]);
 
   useEffect(() => {
     if (isPlaying) return;
@@ -2494,6 +2533,90 @@ function App() {
       document.removeEventListener("webkitfullscreenchange", syncFullscreenState as EventListener);
     };
   }, []);
+  useEffect(() => {
+    const perf = window.performance as PerformanceWithDebugMemory;
+    const nav = window.navigator as NavigatorWithDeviceMemory;
+    const sampleIntervalMs = 500;
+    const detailedMemoryEvery = 4;
+    let cancelled = false;
+    let sampling = false;
+    let sampleCount = 0;
+    let smoothedCpu = 0;
+    let lastTick = perf.now();
+
+    const sampleMetrics = async () => {
+      if (cancelled || sampling) return;
+      sampling = true;
+      try {
+        const now = perf.now();
+        if (document.visibilityState === "hidden") {
+          lastTick = now;
+          if (!cancelled) {
+            setDebugMetrics((prev) => ({ ...prev, cpuPercent: 0, cpuDetail: "Paused while the tab is hidden." }));
+          }
+          return;
+        }
+
+        const elapsedMs = now - lastTick;
+        lastTick = now;
+        const blockedMs = Math.max(0, elapsedMs - sampleIntervalMs);
+        const instantCpu = Math.min(100, (blockedMs / sampleIntervalMs) * 100);
+        smoothedCpu = smoothedCpu === 0 ? instantCpu : smoothedCpu * 0.72 + instantCpu * 0.28;
+        sampleCount += 1;
+
+        const heap = perf.memory;
+        const deviceMemory = nav.deviceMemory;
+        let pageBytes: number | null = null;
+        if (sampleCount % detailedMemoryEvery === 0 && typeof perf.measureUserAgentSpecificMemory === "function") {
+          try {
+            const memoryBreakdown = await perf.measureUserAgentSpecificMemory();
+            pageBytes = memoryBreakdown.bytes;
+          } catch {
+            pageBytes = null;
+          }
+        }
+
+        const memoryParts: string[] = [];
+        let memoryLabel = "Unavailable";
+        if (heap) {
+          const availableBytes = Math.max(0, heap.jsHeapSizeLimit - heap.usedJSHeapSize);
+          memoryLabel = formatBytes(availableBytes);
+          memoryParts.push(`used ${formatBytes(heap.usedJSHeapSize)}`);
+          memoryParts.push(`heap ${formatBytes(availableBytes)} free`);
+          memoryParts.push(`limit ${formatBytes(heap.jsHeapSizeLimit)}`);
+        } else if (pageBytes !== null) {
+          memoryLabel = formatBytes(pageBytes);
+          memoryParts.push(`page ${formatBytes(pageBytes)}`);
+        }
+        if (typeof deviceMemory === "number") {
+          memoryParts.push(`device ${formatDeviceMemory(deviceMemory)}`);
+          if (memoryLabel === "Unavailable") {
+            memoryLabel = formatDeviceMemory(deviceMemory);
+          }
+        }
+
+        if (!cancelled) {
+          setDebugMetrics({
+            cpuPercent: Math.round(smoothedCpu),
+            cpuDetail: blockedMs > 0 ? `${Math.round(blockedMs)} ms blocked over the last 0.5 s.` : "Main thread is currently keeping up.",
+            memoryLabel,
+            memoryDetail: memoryParts.length > 0 ? memoryParts.join(" · ") : "Browser memory details are not exposed here.",
+          });
+        }
+      } finally {
+        sampling = false;
+      }
+    };
+
+    void sampleMetrics();
+    const intervalId = window.setInterval(() => {
+      void sampleMetrics();
+    }, sampleIntervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const selectedTimingMode = lines[selectedLine].timingMode;
   const params = lines[selectedLine].params;
@@ -2625,6 +2748,25 @@ function App() {
       title={`${tempo} BPM`}
     >
       <span>{tempo}</span>
+    </div>
+  );
+
+  const renderDebugPanel = () => (
+    <div className="settings-subsection debug-metrics-panel">
+      <div className="settings-subsection-label">Debug</div>
+      <div className="settings-helper">CPU is an estimate of main-thread pressure, useful for tracking audio crackles.</div>
+      <div className="debug-metrics-grid">
+        <div className="debug-metric-card">
+          <span className="debug-metric-label">CPU</span>
+          <strong className="debug-metric-value">{debugMetrics.cpuPercent}%</strong>
+          <span className="debug-metric-detail">{debugMetrics.cpuDetail}</span>
+        </div>
+        <div className="debug-metric-card">
+          <span className="debug-metric-label">Memory</span>
+          <strong className="debug-metric-value">{debugMetrics.memoryLabel}</strong>
+          <span className="debug-metric-detail">{debugMetrics.memoryDetail}</span>
+        </div>
+      </div>
     </div>
   );
 
@@ -2981,6 +3123,7 @@ function App() {
             {googleAccessToken ? "Backup" : "Google Drive"}
           </button>
         </div>
+        {renderDebugPanel()}
         {googleSyncMessage ? <span className={`google-sync-status mobile-google-sync-status ${googleSyncStatus}`}>{googleSyncMessage}</span> : null}
       </div>
     );
