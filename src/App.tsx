@@ -780,10 +780,11 @@ const loadFxVisibilitySettings = (): FxVisibilitySettings => {
 };
 
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
-const VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS = 0.2;
+const VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS = 0.3;
 const HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS = 2.2;
 const VISIBLE_SCHEDULER_INTERVAL_MS = 25;
 const HIDDEN_SCHEDULER_INTERVAL_MS = 250;
+const TRANSPORT_START_LEAD_SECONDS = 0.08;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -904,6 +905,7 @@ function App() {
   const voiceStepRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const voiceTickRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const nextStepTimeRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
+  const transportStartTimeRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
@@ -935,12 +937,12 @@ function App() {
     scheduledPlayheadTimeoutsRef.current = [];
   };
 
-  const resetPlaybackState = () => {
+  const resetPlaybackState = (startTime = audioRef.current?.currentTime ?? 0) => {
     clearScheduledPlayheadUpdates();
     setPlayheadValue(-1);
     voiceStepRef.current.fill(0);
     voiceTickRef.current.fill(0);
-    nextStepTimeRef.current.fill(audioRef.current?.currentTime ?? 0);
+    nextStepTimeRef.current.fill(startTime);
   };
 
   const buildProjectSnapshot = (): ProjectData => ({
@@ -1010,6 +1012,31 @@ function App() {
 
   const ensureAudio = (lineIndex?: number) => ensureAudioGraph(audioRef, masterRef, reverbBufferRef, lineFxRef, lineIndex);
   const prepareAudio = () => prepareAudioGraph(audioRef, masterRef, reverbBufferRef);
+  const togglePlaybackTransport = async () => {
+    if (isPlaying) {
+      transportStartTimeRef.current = null;
+      setIsPlaying(false);
+      stopAudioVoices(audioRef, lineFxRef);
+      resetPlaybackState();
+      return;
+    }
+
+    try {
+      const graph = await prepareAudio();
+      if (!graph) return;
+      if (graph.ctx.state === "suspended") {
+        await graph.ctx.resume();
+      }
+      for (let li = 0; li < lineCountRef.current; li += 1) {
+        ensureAudio(li);
+      }
+      transportStartTimeRef.current = graph.ctx.currentTime + TRANSPORT_START_LEAD_SECONDS;
+      setIsPlaying(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start audio.";
+      window.alert(message);
+    }
+  };
 
   const placePitch = (lineIndex: number, stepIndex: number, pitch: PitchName) => {
     const line = lines[lineIndex];
@@ -1379,7 +1406,10 @@ function App() {
         ensureAudio(li);
       }
 
-      resetPlaybackState();
+      const ctx = graph?.ctx ?? audioRef.current;
+      const startTime = Math.max(transportStartTimeRef.current ?? 0, (ctx?.currentTime ?? 0) + 0.01);
+      transportStartTimeRef.current = null;
+      resetPlaybackState(startTime);
       const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
       const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
       const visibleLookaheadSeconds = VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
@@ -3500,7 +3530,7 @@ function App() {
               </button>
               <div className="mobile-summary-actions">
                 {renderBpmVisualizer()}
-                <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
+                <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => void togglePlaybackTransport()}>
                   {isPlaying ? "Stop" : "Play"}
                 </button>
                 <div className="header-length-select">
@@ -3562,7 +3592,7 @@ function App() {
             </button>
             <div className="mobile-summary-actions">
               {renderBpmVisualizer("desktop-bpm-visualizer")}
-              <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => setIsPlaying((v) => !v)}>
+              <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => void togglePlaybackTransport()}>
                 {isPlaying ? "Stop" : "Play"}
               </button>
               <button

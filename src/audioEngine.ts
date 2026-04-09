@@ -419,6 +419,20 @@ const releaseVoiceAtTime = (voice: AudioLineVoice, time: number, releaseSeconds 
   voice.lastGateReleaseTime = safeTime + releaseSeconds;
 };
 
+const cancelNodeVoiceAutomation = (voice: NodeAudioLineVoice, time: number) => {
+  holdAudioParam(voice.oscillator.frequency, time);
+  holdAudioParam(voice.filterA.frequency, time);
+  holdAudioParam(voice.filterA.Q, time);
+  if (voice.filterB) {
+    holdAudioParam(voice.filterB.frequency, time);
+    holdAudioParam(voice.filterB.Q, time);
+  }
+  if (voice.toneHighpass) {
+    holdAudioParam(voice.toneHighpass.frequency, time);
+  }
+  holdAudioParam(voice.amp.gain, time);
+};
+
 const getPreviousSoundingBaseStep = <TStep extends EngineStep>(
   steps: TStep[],
   stepIndex: number,
@@ -864,6 +878,11 @@ export const stopAudioVoices = (
   const now = atTime ?? ctx.currentTime;
   for (const fx of lineFxRef.current) {
     if (!fx) continue;
+    holdAudioParam(fx.output.gain, now);
+    fx.output.gain.setValueAtTime(0, now);
+    if (fx.voice.mode === "node") {
+      cancelNodeVoiceAutomation(fx.voice, now);
+    }
     releaseVoiceAtTime(fx.voice, now, 0.045);
   }
 };
