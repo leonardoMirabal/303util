@@ -111,7 +111,9 @@ fi
 echo "Connected devices:"
 adb devices
 
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${SCRIPT_DIR}/src-tauri/target-android-dev}"
+DEFAULT_ANDROID_CARGO_TARGET_DIR="${HOME}/Library/Caches/303util/cargo-target-android-dev"
+mkdir -p "${DEFAULT_ANDROID_CARGO_TARGET_DIR}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${DEFAULT_ANDROID_CARGO_TARGET_DIR}}"
 
 ANDROID_INCREMENTAL_DIR="${CARGO_TARGET_DIR}/aarch64-linux-android/debug/incremental"
 if [ -d "${ANDROID_INCREMENTAL_DIR}" ]; then
