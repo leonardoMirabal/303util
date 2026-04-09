@@ -1300,6 +1300,15 @@ button.selected {
   padding: 0;
   min-height: 12px;
   font-size: 0.48rem;
+  background: #191d21;
+  border-color: #22272d;
+  color: #76808b;
+}
+
+.lane-time button.lane-time-rest {
+  background: #191d21;
+  border-color: #22272d;
+  color: #76808b;
 }
 
 .lane-time button.lane-time-note.selected {
@@ -1315,9 +1324,9 @@ button.selected {
 }
 
 .lane-time button.lane-time-rest.selected {
-  background: #df6262;
-  border-color: #ffd0d0;
-  color: #220808;
+  background: #191d21;
+  border-color: #22272d;
+  color: #76808b;
 }
 
 .modifier-row {

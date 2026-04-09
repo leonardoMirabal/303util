@@ -1030,7 +1030,9 @@ function App() {
       for (let li = 0; li < lineCountRef.current; li += 1) {
         ensureAudio(li);
       }
-      transportStartTimeRef.current = graph.ctx.currentTime + TRANSPORT_START_LEAD_SECONDS;
+      const transportStartTime = graph.ctx.currentTime + TRANSPORT_START_LEAD_SECONDS;
+      syncAllLineAudioState(Math.max(graph.ctx.currentTime, transportStartTime - 0.05));
+      transportStartTimeRef.current = transportStartTime;
       setIsPlaying(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start audio.";
@@ -1254,18 +1256,15 @@ function App() {
       findBaseStep,
     });
   };
-
-  useEffect(() => {
-    linesRef.current = lines;
-  }, [lines]);
-  useEffect(() => {
+  const syncAllLineAudioState = (atTime?: number) => {
     const ctx = audioRef.current;
     if (!ctx) return;
-    const now = ctx.currentTime;
-    for (let li = 0; li < lineCount; li += 1) {
+    const now = atTime ?? ctx.currentTime;
+    const linesNow = linesRef.current;
+    for (let li = 0; li < lineCountRef.current; li += 1) {
       syncLineAudioState({
         lineIndex: li,
-        params: applyFxVisibilityToParams(lines[li].params),
+        params: applyFxVisibilityToParams(linesNow[li].params),
         tempo,
         audioRef,
         masterRef,
@@ -1274,6 +1273,15 @@ function App() {
         atTime: now,
       });
     }
+  };
+
+  useEffect(() => {
+    linesRef.current = lines;
+  }, [lines]);
+  useEffect(() => {
+    const ctx = audioRef.current;
+    if (!ctx) return;
+    syncAllLineAudioState(ctx.currentTime);
   }, [fxVisibility, lineCount, lines, tempo]);
   useEffect(() => {
     lineCountRef.current = lineCount;
@@ -1408,6 +1416,7 @@ function App() {
 
       const ctx = graph?.ctx ?? audioRef.current;
       const startTime = Math.max(transportStartTimeRef.current ?? 0, (ctx?.currentTime ?? 0) + 0.01);
+      syncAllLineAudioState(Math.max(ctx?.currentTime ?? 0, startTime - 0.05));
       transportStartTimeRef.current = null;
       resetPlaybackState(startTime);
       const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");

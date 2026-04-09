@@ -72,16 +72,24 @@ type WorkletAudioLineVoice = {
   lastGateReleaseTime: number;
 };
 
-type AudioLineVoice = NodeAudioLineVoice | WorkletAudioLineVoice;
+type DisabledAudioLineVoice = {
+  mode: "disabled";
+  isLowPower: boolean;
+  lastWaveform: OscillatorType;
+  lastFrequency: number;
+  lastToneHighpassFrequency: number;
+  lastTune: number;
+  lastGateReleaseTime: number;
+};
+
+type AudioLineVoice = NodeAudioLineVoice | WorkletAudioLineVoice | DisabledAudioLineVoice;
 
 type ScheduledAudioNoteVoice = {
   oscillator: OscillatorNode;
-  preGain: GainNode;
-  dcHighpass: BiquadFilterNode;
   filterA: BiquadFilterNode;
-  filterB: BiquadFilterNode | null;
-  toneHighpass: BiquadFilterNode | null;
   amp: GainNode;
+  frequency: number;
+  stopTime: number | null;
 };
 
 export type AudioLineFx = {
@@ -106,6 +114,7 @@ export type AudioLineFx = {
   reverbWet?: GainNode;
   voice: AudioLineVoice;
   activeVoices: ScheduledAudioNoteVoice[];
+  monoVoice: ScheduledAudioNoteVoice | null;
   isLowPower: boolean;
   lastDelayTime: number;
   lastFeedbackAmount: number;
@@ -275,65 +284,6 @@ const ensureWorkletModule = async (ctx: AudioContext): Promise<boolean> => {
   return loading;
 };
 
-const makeNodeVoice = (ctx: AudioContext, send: GainNode, lowPower = false): NodeAudioLineVoice => {
-  const oscillator = ctx.createOscillator();
-  const preGain = ctx.createGain();
-  const dcHighpass = ctx.createBiquadFilter();
-  const filterA = ctx.createBiquadFilter();
-  const filterB = lowPower ? null : ctx.createBiquadFilter();
-  const toneHighpass = lowPower ? null : ctx.createBiquadFilter();
-  const amp = ctx.createGain();
-
-  oscillator.type = "sawtooth";
-  oscillator.frequency.value = 110;
-  preGain.gain.value = 0.82;
-  dcHighpass.type = "highpass";
-  dcHighpass.frequency.value = 26;
-  filterA.type = "lowpass";
-  filterA.frequency.value = 320;
-  filterA.Q.value = 1.1;
-  if (filterB) {
-    filterB.type = "lowpass";
-    filterB.frequency.value = 280;
-    filterB.Q.value = 0.9;
-  }
-  if (toneHighpass) {
-    toneHighpass.type = "highpass";
-    toneHighpass.frequency.value = 34;
-  }
-  amp.gain.value = 0.00001;
-
-  oscillator.connect(preGain);
-  preGain.connect(dcHighpass);
-  dcHighpass.connect(filterA);
-  if (filterB && toneHighpass) {
-    filterA.connect(filterB);
-    filterB.connect(toneHighpass);
-    toneHighpass.connect(amp);
-  } else {
-    filterA.connect(amp);
-  }
-  amp.connect(send);
-  oscillator.start();
-
-  return {
-    mode: "node",
-    oscillator,
-    preGain,
-    dcHighpass,
-    filterA,
-    filterB,
-    toneHighpass,
-    amp,
-    isLowPower: lowPower,
-    lastWaveform: "sawtooth",
-    lastFrequency: 110,
-    lastToneHighpassFrequency: toneHighpass?.frequency.value ?? 0,
-    lastTune: 0,
-    lastGateReleaseTime: 0,
-  };
-};
-
 const makeWorkletVoice = (ctx: AudioContext, send: GainNode, lowPower = false): WorkletAudioLineVoice => {
   const node = new AudioWorkletNode(ctx, WORKLET_PROCESSOR_NAME, {
     numberOfInputs: 0,
@@ -355,64 +305,45 @@ const makeWorkletVoice = (ctx: AudioContext, send: GainNode, lowPower = false): 
   };
 };
 
+const makeDisabledVoice = (lowPower = false): DisabledAudioLineVoice => ({
+  mode: "disabled",
+  isLowPower: lowPower,
+  lastWaveform: "sawtooth",
+  lastFrequency: 110,
+  lastToneHighpassFrequency: 0,
+  lastTune: 0,
+  lastGateReleaseTime: 0,
+});
+
 const makeScheduledNoteVoice = (
   ctx: AudioContext,
   send: GainNode,
   waveform: OscillatorType,
-  lowPower = false,
 ): ScheduledAudioNoteVoice => {
   const oscillator = ctx.createOscillator();
-  const preGain = ctx.createGain();
-  const dcHighpass = ctx.createBiquadFilter();
   const filterA = ctx.createBiquadFilter();
-  const filterB = lowPower ? null : ctx.createBiquadFilter();
-  const toneHighpass = lowPower ? null : ctx.createBiquadFilter();
   const amp = ctx.createGain();
 
   oscillator.type = voiceWaveformForParams(waveform);
-  preGain.gain.value = oscillator.type === "square" ? 0.72 : 0.82;
-  dcHighpass.type = "highpass";
-  dcHighpass.frequency.value = 26;
   filterA.type = "lowpass";
-  if (filterB) {
-    filterB.type = "lowpass";
-  }
-  if (toneHighpass) {
-    toneHighpass.type = "highpass";
-    toneHighpass.frequency.value = oscillator.type === "square" ? 44 : 34;
-  }
   amp.gain.value = 0.00001;
 
-  oscillator.connect(preGain);
-  preGain.connect(dcHighpass);
-  dcHighpass.connect(filterA);
-  if (filterB && toneHighpass) {
-    filterA.connect(filterB);
-    filterB.connect(toneHighpass);
-    toneHighpass.connect(amp);
-  } else {
-    filterA.connect(amp);
-  }
+  oscillator.connect(filterA);
+  filterA.connect(amp);
   amp.connect(send);
 
   return {
     oscillator,
-    preGain,
-    dcHighpass,
     filterA,
-    filterB,
-    toneHighpass,
     amp,
+    frequency: 110,
+    stopTime: null,
   };
 };
 
 const disposeScheduledNoteVoice = (voice: ScheduledAudioNoteVoice) => {
   voice.oscillator.disconnect();
-  voice.preGain.disconnect();
-  voice.dcHighpass.disconnect();
   voice.filterA.disconnect();
-  voice.filterB?.disconnect();
-  voice.toneHighpass?.disconnect();
   voice.amp.disconnect();
 };
 
@@ -474,7 +405,7 @@ const setVoiceWaveform = (voice: AudioLineVoice, waveform: OscillatorType) => {
   if (voice.mode === "node") {
     voice.oscillator.type = nextWaveform;
     voice.preGain.gain.value = nextWaveform === "square" ? 0.72 : 0.82;
-  } else {
+  } else if (voice.mode === "worklet") {
     voice.node.port.postMessage({ type: "waveform", waveform: nextWaveform });
   }
   voice.lastWaveform = nextWaveform;
@@ -485,7 +416,7 @@ const releaseVoiceAtTime = (voice: AudioLineVoice, time: number, releaseSeconds 
   if (voice.mode === "node") {
     holdAudioParam(voice.amp.gain, safeTime);
     voice.amp.gain.setTargetAtTime(0.00001, safeTime, Math.max(0.01, releaseSeconds * 0.35));
-  } else {
+  } else if (voice.mode === "worklet") {
     voice.node.port.postMessage({ type: "release", time: safeTime, releaseSeconds });
   }
   voice.lastGateReleaseTime = safeTime + releaseSeconds;
@@ -508,7 +439,10 @@ const cancelNodeVoiceAutomation = (voice: NodeAudioLineVoice, time: number) => {
 const releaseScheduledNoteVoice = (voice: ScheduledAudioNoteVoice, time: number, releaseSeconds = VOICE_RELEASE_SECONDS) => {
   voice.amp.gain.cancelScheduledValues(time);
   voice.amp.gain.setTargetAtTime(0.00001, time, Math.max(0.01, releaseSeconds * 0.35));
-  voice.oscillator.stop(time + releaseSeconds + 0.02);
+  if (voice.stopTime === null) {
+    voice.stopTime = time + releaseSeconds + 0.02;
+    voice.oscillator.stop(voice.stopTime);
+  }
 };
 
 const getPreviousSoundingBaseStep = <TStep extends EngineStep>(
@@ -608,7 +542,7 @@ export const ensureAudioGraph = (
     const send = ctx.createGain();
     const dry = ctx.createGain();
     const output = ctx.createGain();
-    const voice = ENABLE_WORKLET_VOICE && WORKLET_READY_CONTEXTS.has(ctx) ? makeWorkletVoice(ctx, send, lowPower) : makeNodeVoice(ctx, send, lowPower);
+    const voice = ENABLE_WORKLET_VOICE && WORKLET_READY_CONTEXTS.has(ctx) ? makeWorkletVoice(ctx, send, lowPower) : makeDisabledVoice(lowPower);
 
     send.connect(dry);
     dry.connect(output);
@@ -622,6 +556,7 @@ export const ensureAudioGraph = (
       output,
       voice,
       activeVoices: [],
+      monoVoice: null,
       isLowPower: lowPower,
       lastDelayTime: Number.NaN,
       lastFeedbackAmount: Number.NaN,
@@ -964,6 +899,7 @@ export const stopAudioVoices = (
       releaseScheduledNoteVoice(activeVoice, now, 0.045);
     }
     fx.activeVoices = [];
+    fx.monoVoice = null;
     if (fx.voice.mode === "node") {
       cancelNodeVoiceAutomation(fx.voice, now);
     }
@@ -1003,7 +939,6 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
 
   let ctx = audioRef.current;
   let fx = lineFxRef.current[lineIndex];
-  const hadFx = !!fx;
   if (!ctx || !fx) {
     const graph = ensureAudioGraph(audioRef, masterRef, reverbBufferRef, lineFxRef, lineIndex);
     if (!graph) return;
@@ -1012,19 +947,23 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   }
   if (!fx) return;
 
-  const now = startTime ?? ctx.currentTime;
-  if (!hadFx) {
-    syncLineAudioState({
-      lineIndex,
-      params,
-      tempo,
-      audioRef,
-      masterRef,
-      reverbBufferRef,
-      lineFxRef,
-      atTime: now,
-    });
+  let noteSteps = 1;
+  for (let s = stepIndex + 1; s < playableLength; s += 1) {
+    if (steps[s].timeMode === "tie") noteSteps += 1;
+    else break;
   }
+
+  const now = startTime ?? ctx.currentTime;
+  syncLineAudioState({
+    lineIndex,
+    params,
+    tempo,
+    audioRef,
+    masterRef,
+    reverbBufferRef,
+    lineFxRef,
+    atTime: now,
+  });
 
   const voice = fx.voice;
 
@@ -1032,14 +971,16 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   if (!transposeFrequency) return;
   const freq = transposeFrequency[step.transpose] * tuneMultiplier(params.tune);
   const isSlideStep = shouldSlideIntoStep(steps, stepIndex, findBaseStep);
-  const gateSteps = getSequencedGateSteps(steps, stepIndex, playableLength, findBaseStep);
-  const gateSeconds = Math.max(0.11, gateSteps * stepLenSeconds * 0.98);
-  const amp = ampContour(params, step.accent);
-  const filter = cutoffContour(params, step.accent);
-  const peakTime = now + filterHoldTime(gateSeconds);
-  const releaseTime = now + Math.max(gateSeconds, amp.decaySeconds);
+  const gateSeconds = Math.max(0.12, noteSteps * stepLenSeconds * 0.92);
+  const releaseTime = now + Math.max(gateSeconds, params.decay * noteSteps);
 
   if (voice.mode === "worklet") {
+    const gateSteps = getSequencedGateSteps(steps, stepIndex, playableLength, findBaseStep);
+    const workletGateSeconds = Math.max(0.11, gateSteps * stepLenSeconds * 0.98);
+    const amp = ampContour(params, step.accent);
+    const filter = cutoffContour(params, step.accent);
+    const peakTime = now + filterHoldTime(workletGateSeconds);
+    const workletReleaseTime = now + Math.max(gateSeconds, amp.decaySeconds);
     setVoiceWaveform(voice, params.waveform);
     const slideSeconds = isSlideStep ? slideSecondsForParams(params) : 0;
     const slideFilterTarget = clamp(filter.base + (step.accent ? 180 : 60), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
@@ -1050,7 +991,7 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
       freq,
       slide: isSlideStep,
       slideSeconds,
-      releaseTime,
+      releaseTime: workletReleaseTime,
       releaseSeconds: VOICE_RELEASE_SECONDS,
       filterBase: filter.base,
       filterPeak: filter.peak,
@@ -1060,28 +1001,15 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
       ampPeak: amp.peak,
       ampSustain: Math.max(0.00001, amp.peak * amp.sustainFloor),
       attackSeconds: amp.attackSeconds,
-      sustainTime: now + Math.max(0.035, gateSeconds * 0.38),
+      sustainTime: now + Math.max(0.035, workletGateSeconds * 0.38),
       slideFilterTarget,
       slideGainTarget,
     });
     voice.lastFrequency = freq;
     voice.lastTune = params.tune;
-    voice.lastGateReleaseTime = releaseTime + VOICE_RELEASE_SECONDS;
+    voice.lastGateReleaseTime = workletReleaseTime + VOICE_RELEASE_SECONDS;
     return;
   }
-  const noteVoice = makeScheduledNoteVoice(ctx, fx.send, params.waveform, fx.isLowPower);
-  fx.activeVoices.push(noteVoice);
-  noteVoice.oscillator.onended = () => {
-    disposeScheduledNoteVoice(noteVoice);
-    fx.activeVoices = fx.activeVoices.filter((activeVoice) => activeVoice !== noteVoice);
-  };
-
-  noteVoice.filterA.Q.setValueAtTime(filter.qA, now);
-  if (noteVoice.filterB) {
-    noteVoice.filterB.Q.setValueAtTime(filter.qB, now);
-  }
-
-  const sustainTime = now + Math.max(0.035, gateSeconds * 0.38);
   const previousBaseStep = getPreviousSoundingBaseStep(steps, stepIndex, findBaseStep);
   const previousStep = previousBaseStep === null ? null : steps[previousBaseStep];
   const previousTransposeFrequency =
@@ -1089,46 +1017,44 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   const previousTranspose = previousStep?.transpose ?? "none";
   const fromFrequency = previousTransposeFrequency ? previousTransposeFrequency[previousTranspose] * tuneMultiplier(params.tune) : freq;
 
+  const noteVoice = makeScheduledNoteVoice(ctx, fx.send, params.waveform);
+  fx.activeVoices.push(noteVoice);
+  noteVoice.oscillator.onended = () => {
+    disposeScheduledNoteVoice(noteVoice);
+    fx.activeVoices = fx.activeVoices.filter((activeVoice) => activeVoice !== noteVoice);
+  };
+
+  const accentGain = step.accent ? params.accent : 1;
+  const targetGain = clamp(params.volume * accentGain, 0, 0.72);
+  if (targetGain <= 0.0001) {
+    noteVoice.stopTime = now;
+    noteVoice.oscillator.start(now);
+    noteVoice.oscillator.stop(now);
+    return;
+  }
+  const baseCutoff = clamp(params.cutoff + (step.accent ? 140 : 0), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
+  const peakCutoff = clamp(baseCutoff + params.envMod * (step.accent ? 1.12 : 1), baseCutoff + 40, MAX_FILTER_CUTOFF);
+  const tailCutoff = clamp(params.cutoff * 0.58, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
+  const filterQ = clamp(1 + params.resonance * (step.accent ? 1.08 : 1), 0.8, 24);
+
+  noteVoice.filterA.Q.setValueAtTime(filterQ, now);
+
   if (isSlideStep) {
-    const slideSeconds = slideSecondsForParams(params);
-    const slideArrivalTime = now + slideSeconds;
-    const slideFilterBase = clamp(filter.base + (step.accent ? 180 : 60), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
-    const slideGainTarget = Math.max(0.00001, amp.peak * (step.accent ? 0.98 : 0.9));
-
     noteVoice.oscillator.frequency.setValueAtTime(Math.max(1, fromFrequency), now);
-    noteVoice.oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, freq), slideArrivalTime);
-
-    noteVoice.filterA.frequency.setValueAtTime(slideFilterBase, now);
-    noteVoice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.peak, slideFilterBase + 1, MAX_FILTER_CUTOFF), peakTime);
-    noteVoice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.tail, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
-    if (noteVoice.filterB) {
-      const filterBaseB = clamp(slideFilterBase * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
-      noteVoice.filterB.frequency.setValueAtTime(filterBaseB, now);
-      noteVoice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.peak * 0.9, filterBaseB + 1, MAX_FILTER_CUTOFF), peakTime);
-      noteVoice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
-    }
-
-    noteVoice.amp.gain.setValueAtTime(Math.max(0.00001, slideGainTarget * 0.9), now);
-    noteVoice.amp.gain.linearRampToValueAtTime(slideGainTarget, Math.min(slideArrivalTime, now + 0.01));
-    noteVoice.amp.gain.exponentialRampToValueAtTime(Math.max(0.00001, amp.peak * amp.sustainFloor), sustainTime);
+    noteVoice.oscillator.frequency.linearRampToValueAtTime(Math.max(1, freq), now + Math.min(0.2, params.decay * 0.8 + 0.06));
+    noteVoice.amp.gain.setValueAtTime(Math.max(0.0001, targetGain * 0.82), now);
   } else {
     noteVoice.oscillator.frequency.setValueAtTime(Math.max(1, freq), now);
-
-    noteVoice.filterA.frequency.setValueAtTime(clamp(filter.base, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
-    noteVoice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.peak, filter.base + 1, MAX_FILTER_CUTOFF), peakTime);
-    noteVoice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.tail, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
-    if (noteVoice.filterB) {
-      const filterBaseB = clamp(filter.base * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
-      noteVoice.filterB.frequency.setValueAtTime(filterBaseB, now);
-      noteVoice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.peak * 0.9, filterBaseB + 1, MAX_FILTER_CUTOFF), peakTime);
-      noteVoice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
-    }
-
-    noteVoice.amp.gain.setValueAtTime(0.00001, now);
-    noteVoice.amp.gain.linearRampToValueAtTime(Math.max(0.00001, amp.peak), now + amp.attackSeconds);
-    noteVoice.amp.gain.exponentialRampToValueAtTime(Math.max(0.00001, amp.peak * amp.sustainFloor), sustainTime);
+    noteVoice.amp.gain.setValueAtTime(0.0001, now);
+    noteVoice.amp.gain.linearRampToValueAtTime(targetGain, now + 0.005);
   }
 
+  noteVoice.filterA.frequency.setValueAtTime(baseCutoff, now);
+  noteVoice.filterA.frequency.linearRampToValueAtTime(peakCutoff, now + 0.02);
+  noteVoice.filterA.frequency.exponentialRampToValueAtTime(tailCutoff, releaseTime);
+  noteVoice.amp.gain.exponentialRampToValueAtTime(0.0001, releaseTime);
+  noteVoice.frequency = freq;
   noteVoice.oscillator.start(now);
-  releaseScheduledNoteVoice(noteVoice, releaseTime, VOICE_RELEASE_SECONDS);
+  noteVoice.stopTime = releaseTime + 0.08;
+  noteVoice.oscillator.stop(noteVoice.stopTime);
 };

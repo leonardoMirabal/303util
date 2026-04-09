@@ -111,9 +111,26 @@ fi
 echo "Connected devices:"
 adb devices
 
+DEVICE_SERIAL="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
+APP_IDENTIFIER="$(node -e 'const fs=require("fs"); const config=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(config.identifier || "");' "${SCRIPT_DIR}/src-tauri/tauri.conf.json")"
+
+if [ -z "${APP_IDENTIFIER}" ]; then
+  echo "Error: could not resolve app identifier from src-tauri/tauri.conf.json."
+  exit 1
+fi
+
+if adb -s "${DEVICE_SERIAL}" shell pm list packages "${APP_IDENTIFIER}" | grep -Fq "package:${APP_IDENTIFIER}"; then
+  echo "Uninstalling existing app ${APP_IDENTIFIER} from ${DEVICE_SERIAL}..."
+  adb -s "${DEVICE_SERIAL}" uninstall "${APP_IDENTIFIER}"
+fi
+
 DEFAULT_ANDROID_CARGO_TARGET_DIR="${HOME}/Library/Caches/303util/cargo-target-android-dev"
-mkdir -p "${DEFAULT_ANDROID_CARGO_TARGET_DIR}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${DEFAULT_ANDROID_CARGO_TARGET_DIR}}"
+if [ -d "${CARGO_TARGET_DIR}" ]; then
+  echo "Clearing Android cargo target dir..."
+  rm -rf "${CARGO_TARGET_DIR}"
+fi
+mkdir -p "${CARGO_TARGET_DIR}"
 
 ANDROID_INCREMENTAL_DIR="${CARGO_TARGET_DIR}/aarch64-linux-android/debug/incremental"
 if [ -d "${ANDROID_INCREMENTAL_DIR}" ]; then
@@ -123,6 +140,27 @@ fi
 
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 export CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}"
+export VITE_APP_VERSION="${VITE_APP_VERSION:-0.0.0-dev}"
+export VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-android-debug-client-id}"
+export VITE_GOOGLE_DESKTOP_CLIENT_ID="${VITE_GOOGLE_DESKTOP_CLIENT_ID:-desktop-debug-client-id}"
+
+for port in 1420 1421; do
+  listener_pid="$(lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+  if [ -z "${listener_pid}" ]; then
+    continue
+  fi
+
+  listener_command="$(ps -p "${listener_pid}" -o command= || true)"
+  if [[ "${listener_command}" == *"${SCRIPT_DIR}/node_modules/.bin/vite"* ]]; then
+    echo "Stopping stale Vite server on port ${port} (PID ${listener_pid})..."
+    kill "${listener_pid}"
+    wait "${listener_pid}" 2>/dev/null || true
+    continue
+  fi
+
+  echo "Error: port ${port} is already in use by PID ${listener_pid}: ${listener_command}"
+  exit 1
+done
 
 echo "Starting Tauri Android dev..."
 npm run tauri android dev
