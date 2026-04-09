@@ -28,6 +28,18 @@ export ANDROID_HOME="${ANDROID_SDK_DIR}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_DIR}"
 export PATH="${ANDROID_SDK_DIR}/platform-tools:${ANDROID_SDK_DIR}/emulator:${ANDROID_SDK_DIR}/cmdline-tools/latest/bin:${PATH}"
 
+APP_IDENTIFIER="$(node -e 'const fs=require("fs"); const config=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(config.identifier || "");' "${SCRIPT_DIR}/src-tauri/tauri.conf.json")"
+if [ -z "${APP_IDENTIFIER}" ]; then
+  echo "Error: could not resolve app identifier from src-tauri/tauri.conf.json."
+  exit 1
+fi
+
+EXPECTED_ANDROID_PACKAGE_DIR="${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/java/$(printf '%s' "${APP_IDENTIFIER}" | tr '.' '/')"
+ICON_SOURCE_FILE="${SCRIPT_DIR}/public/icon_knob_rounded_square.svg"
+if [ ! -f "${ICON_SOURCE_FILE}" ]; then
+  ICON_SOURCE_FILE="${SCRIPT_DIR}/public/icon_knob.svg"
+fi
+
 DEFAULT_AVD_NAME="Pixel_6_API_35"
 AVD_NAME="${1:-${ANDROID_AVD_NAME:-${DEFAULT_AVD_NAME}}}"
 EMULATOR_BIN="${ANDROID_EMULATOR_BIN:-}"
@@ -73,6 +85,21 @@ if ! command -v adb >/dev/null 2>&1; then
   exit 1
 fi
 
+refresh_android_project() {
+  echo "Refreshing native Tauri icons from ${ICON_SOURCE_FILE}..."
+  npx tauri icon "${ICON_SOURCE_FILE}" -o "${SCRIPT_DIR}/src-tauri/icons"
+
+  echo "Recreating Android project..."
+  rm -rf "${SCRIPT_DIR}/src-tauri/gen/android"
+  npx tauri android init --ci --skip-targets-install
+}
+
+if [ ! -d "${EXPECTED_ANDROID_PACKAGE_DIR}" ]; then
+  echo "Android project package path is stale or missing:"
+  echo "  expected ${EXPECTED_ANDROID_PACKAGE_DIR}"
+  refresh_android_project
+fi
+
 GRADLE_APP_FILE="${SCRIPT_DIR}/src-tauri/gen/android/app/build.gradle.kts"
 if [ -f "${GRADLE_APP_FILE}" ]; then
   perl -0pi -e 's/setProperty\("archivesBaseName",\s*"[^"]+"\)/setProperty("archivesBaseName", "app")/g' "${GRADLE_APP_FILE}"
@@ -112,12 +139,6 @@ echo "Connected devices:"
 adb devices
 
 DEVICE_SERIAL="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
-APP_IDENTIFIER="$(node -e 'const fs=require("fs"); const config=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(config.identifier || "");' "${SCRIPT_DIR}/src-tauri/tauri.conf.json")"
-
-if [ -z "${APP_IDENTIFIER}" ]; then
-  echo "Error: could not resolve app identifier from src-tauri/tauri.conf.json."
-  exit 1
-fi
 
 if adb -s "${DEVICE_SERIAL}" shell pm list packages "${APP_IDENTIFIER}" | grep -Fq "package:${APP_IDENTIFIER}"; then
   echo "Uninstalling existing app ${APP_IDENTIFIER} from ${DEVICE_SERIAL}..."
