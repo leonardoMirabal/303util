@@ -49,9 +49,10 @@ type AudioLineVoice = {
   preGain: GainNode;
   dcHighpass: BiquadFilterNode;
   filterA: BiquadFilterNode;
-  filterB: BiquadFilterNode;
-  toneHighpass: BiquadFilterNode;
+  filterB: BiquadFilterNode | null;
+  toneHighpass: BiquadFilterNode | null;
   amp: GainNode;
+  isLowPower: boolean;
   lastWaveform: OscillatorType;
   lastFrequency: number;
   lastToneHighpassFrequency: number;
@@ -63,23 +64,24 @@ export type AudioLineFx = {
   send: GainNode;
   dry: GainNode;
   output: GainNode;
-  overdrive: WaveShaperNode;
-  overdriveTone: BiquadFilterNode;
-  overdriveWet: GainNode;
-  delaySend: GainNode;
-  delayWet: GainNode;
-  delay: DelayNode;
-  delayTone: BiquadFilterNode;
-  feedback: GainNode;
-  distortion: WaveShaperNode;
-  distortionTone: BiquadFilterNode;
-  distWet: GainNode;
-  reverbSend: GainNode;
-  reverbPreDelay: DelayNode;
-  reverbTone: BiquadFilterNode;
-  reverb: ConvolverNode;
-  reverbWet: GainNode;
+  overdrive?: WaveShaperNode;
+  overdriveTone?: BiquadFilterNode;
+  overdriveWet?: GainNode;
+  delaySend?: GainNode;
+  delayWet?: GainNode;
+  delay?: DelayNode;
+  delayTone?: BiquadFilterNode;
+  feedback?: GainNode;
+  distortion?: WaveShaperNode;
+  distortionTone?: BiquadFilterNode;
+  distWet?: GainNode;
+  reverbSend?: GainNode;
+  reverbPreDelay?: DelayNode;
+  reverbTone?: BiquadFilterNode;
+  reverb?: ConvolverNode;
+  reverbWet?: GainNode;
   voice: AudioLineVoice;
+  isLowPower: boolean;
   lastDelayTime: number;
   lastFeedbackAmount: number;
   lastDelayMixAmount: number;
@@ -147,6 +149,13 @@ const OVERDRIVE_CURVE_CACHE = new Map<number, Float32Array>();
 const DISTORTION_CURVE_CACHE = new Map<number, Float32Array>();
 const REVERB_IMPULSE_CACHE = new Map<number, AudioBuffer>();
 
+const isLowPowerAudioDevice = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const compactViewport = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 980px)").matches : false;
+  const mobileUserAgent = /\b(Android|iPhone|iPad|iPod|Mobile)\b/i.test(window.navigator.userAgent);
+  return compactViewport || mobileUserAgent;
+};
+
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const normalize = (value: number, min: number, max: number): number => clamp((value - min) / (max - min), 0, 1);
 
@@ -213,13 +222,13 @@ const getImpulseResponse = (ctx: AudioContext, duration: number): AudioBuffer =>
   return impulse;
 };
 
-const makeVoice = (ctx: AudioContext, send: GainNode): AudioLineVoice => {
+const makeVoice = (ctx: AudioContext, send: GainNode, lowPower = false): AudioLineVoice => {
   const oscillator = ctx.createOscillator();
   const preGain = ctx.createGain();
   const dcHighpass = ctx.createBiquadFilter();
   const filterA = ctx.createBiquadFilter();
-  const filterB = ctx.createBiquadFilter();
-  const toneHighpass = ctx.createBiquadFilter();
+  const filterB = lowPower ? null : ctx.createBiquadFilter();
+  const toneHighpass = lowPower ? null : ctx.createBiquadFilter();
   const amp = ctx.createGain();
 
   oscillator.type = "sawtooth";
@@ -228,21 +237,29 @@ const makeVoice = (ctx: AudioContext, send: GainNode): AudioLineVoice => {
   dcHighpass.type = "highpass";
   dcHighpass.frequency.value = 26;
   filterA.type = "lowpass";
-  filterB.type = "lowpass";
   filterA.frequency.value = 320;
-  filterB.frequency.value = 280;
   filterA.Q.value = 1.1;
-  filterB.Q.value = 0.9;
-  toneHighpass.type = "highpass";
-  toneHighpass.frequency.value = 34;
+  if (filterB) {
+    filterB.type = "lowpass";
+    filterB.frequency.value = 280;
+    filterB.Q.value = 0.9;
+  }
+  if (toneHighpass) {
+    toneHighpass.type = "highpass";
+    toneHighpass.frequency.value = 34;
+  }
   amp.gain.value = 0.00001;
 
   oscillator.connect(preGain);
   preGain.connect(dcHighpass);
   dcHighpass.connect(filterA);
-  filterA.connect(filterB);
-  filterB.connect(toneHighpass);
-  toneHighpass.connect(amp);
+  if (filterB && toneHighpass) {
+    filterA.connect(filterB);
+    filterB.connect(toneHighpass);
+    toneHighpass.connect(amp);
+  } else {
+    filterA.connect(amp);
+  }
   amp.connect(send);
   oscillator.start();
 
@@ -254,9 +271,10 @@ const makeVoice = (ctx: AudioContext, send: GainNode): AudioLineVoice => {
     filterB,
     toneHighpass,
     amp,
+    isLowPower: lowPower,
     lastWaveform: "sawtooth",
     lastFrequency: 110,
-    lastToneHighpassFrequency: 34,
+    lastToneHighpassFrequency: toneHighpass?.frequency.value ?? 0,
     lastTune: 0,
     lastGateReleaseTime: 0,
   };
@@ -312,7 +330,7 @@ const ampContour = (params: EngineVoiceParams, accented: boolean) => {
 };
 
 const filterHoldTime = (gateSeconds: number): number => Math.max(0.025, gateSeconds * 0.18);
-const slideSecondsForParams = (params: EngineVoiceParams): number => clamp(0.045 + params.decay * 0.22, 0.055, 0.16);
+const slideSecondsForParams = (params: EngineVoiceParams): number => clamp(0.08 + params.decay * 0.08, 0.08, 0.12);
 
 const setVoiceWaveform = (voice: AudioLineVoice, waveform: OscillatorType) => {
   const nextWaveform = voiceWaveformForParams(waveform);
@@ -396,8 +414,9 @@ export const ensureAudioGraph = (
 ) => {
   const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Ctx) return null;
+  const lowPower = isLowPowerAudioDevice();
   if (!audioRef.current || !masterRef.current) {
-    const ctx = new Ctx();
+    const ctx = lowPower ? new Ctx({ latencyHint: "playback" }) : new Ctx();
     const master = ctx.createGain();
     const limiter = ctx.createDynamicsCompressor();
     master.gain.value = MASTER_OUTPUT_GAIN;
@@ -419,89 +438,20 @@ export const ensureAudioGraph = (
     const send = ctx.createGain();
     const dry = ctx.createGain();
     const output = ctx.createGain();
-    const overdrive = ctx.createWaveShaper();
-    const overdriveTone = ctx.createBiquadFilter();
-    const overdriveWet = ctx.createGain();
-    const delaySend = ctx.createGain();
-    const delayWet = ctx.createGain();
-    const delay = ctx.createDelay(1.0);
-    const delayTone = ctx.createBiquadFilter();
-    const feedback = ctx.createGain();
-    const distortion = ctx.createWaveShaper();
-    const distortionTone = ctx.createBiquadFilter();
-    const distWet = ctx.createGain();
-    const reverbSend = ctx.createGain();
-    const reverbPreDelay = ctx.createDelay(0.2);
-    const reverbTone = ctx.createBiquadFilter();
-    const reverb = ctx.createConvolver();
-    const reverbWet = ctx.createGain();
-    const voice = makeVoice(ctx, send);
+    const voice = makeVoice(ctx, send, lowPower);
 
     send.connect(dry);
     dry.connect(output);
-    send.connect(overdrive);
-    overdrive.connect(overdriveTone);
-    overdriveTone.connect(overdriveWet);
-    overdriveWet.connect(output);
-    overdriveTone.connect(distortion);
-    distortion.connect(distortionTone);
-    distortionTone.connect(distWet);
-    distWet.connect(output);
-    distortionTone.connect(delaySend);
-    distortionTone.connect(reverbSend);
-
-    delaySend.connect(delay);
-    delay.connect(feedback);
-    feedback.connect(delay);
-    delay.connect(delayTone);
-    delayTone.connect(delayWet);
-    delayWet.connect(output);
-
-    reverbSend.connect(reverbPreDelay);
-    reverbPreDelay.connect(reverbTone);
-    reverbTone.connect(reverb);
-    reverb.connect(reverbWet);
-    reverbWet.connect(output);
     output.connect(master);
-
-    overdrive.oversample = "2x";
-    distortion.oversample = "4x";
-    overdriveTone.type = "lowpass";
-    distortionTone.type = "lowpass";
-    delayTone.type = "lowpass";
-    reverbTone.type = "lowpass";
-    reverb.buffer = reverbBufferRef.current;
     dry.gain.value = 1;
     output.gain.value = LINE_OUTPUT_HEADROOM_GAIN;
-    overdriveWet.gain.value = 0;
-    delaySend.gain.value = 0;
-    delayWet.gain.value = 0;
-    feedback.gain.value = 0;
-    distWet.gain.value = 0;
-    reverbSend.gain.value = 0;
-    reverbWet.gain.value = 0;
 
-    lineFxRef.current[lineIndex] = {
+    const baseFx: AudioLineFx = {
       send,
       dry,
       output,
-      overdrive,
-      overdriveTone,
-      overdriveWet,
-      delaySend,
-      delayWet,
-      delay,
-      delayTone,
-      feedback,
-      distortion,
-      distortionTone,
-      distWet,
-      reverbSend,
-      reverbPreDelay,
-      reverbTone,
-      reverb,
-      reverbWet,
       voice,
+      isLowPower: lowPower,
       lastDelayTime: Number.NaN,
       lastFeedbackAmount: Number.NaN,
       lastDelayMixAmount: Number.NaN,
@@ -517,8 +467,170 @@ export const ensureAudioGraph = (
       lastReverbTone: Number.NaN,
       lastOutputGain: Number.NaN,
     };
+
+    if (!lowPower) {
+      const overdrive = ctx.createWaveShaper();
+      const overdriveTone = ctx.createBiquadFilter();
+      const overdriveWet = ctx.createGain();
+      const delaySend = ctx.createGain();
+      const delayWet = ctx.createGain();
+      const delay = ctx.createDelay(1.0);
+      const delayTone = ctx.createBiquadFilter();
+      const feedback = ctx.createGain();
+      const distortion = ctx.createWaveShaper();
+      const distortionTone = ctx.createBiquadFilter();
+      const distWet = ctx.createGain();
+      const reverbSend = ctx.createGain();
+      const reverbPreDelay = ctx.createDelay(0.2);
+      const reverbTone = ctx.createBiquadFilter();
+      const reverb = ctx.createConvolver();
+      const reverbWet = ctx.createGain();
+
+      send.connect(overdrive);
+      overdrive.connect(overdriveTone);
+      overdriveTone.connect(overdriveWet);
+      overdriveWet.connect(output);
+      overdriveTone.connect(distortion);
+      distortion.connect(distortionTone);
+      distortionTone.connect(distWet);
+      distWet.connect(output);
+      distortionTone.connect(delaySend);
+      distortionTone.connect(reverbSend);
+
+      delaySend.connect(delay);
+      delay.connect(feedback);
+      feedback.connect(delay);
+      delay.connect(delayTone);
+      delayTone.connect(delayWet);
+      delayWet.connect(output);
+
+      reverbSend.connect(reverbPreDelay);
+      reverbPreDelay.connect(reverbTone);
+      reverbTone.connect(reverb);
+      reverb.connect(reverbWet);
+      reverbWet.connect(output);
+
+      overdrive.oversample = "2x";
+      distortion.oversample = "4x";
+      overdriveTone.type = "lowpass";
+      distortionTone.type = "lowpass";
+      delayTone.type = "lowpass";
+      reverbTone.type = "lowpass";
+      reverb.buffer = reverbBufferRef.current;
+      overdriveWet.gain.value = 0;
+      delaySend.gain.value = 0;
+      delayWet.gain.value = 0;
+      feedback.gain.value = 0;
+      distWet.gain.value = 0;
+      reverbSend.gain.value = 0;
+      reverbWet.gain.value = 0;
+
+      Object.assign(baseFx, {
+        overdrive,
+        overdriveTone,
+        overdriveWet,
+        delaySend,
+        delayWet,
+        delay,
+        delayTone,
+        feedback,
+        distortion,
+        distortionTone,
+        distWet,
+        reverbSend,
+        reverbPreDelay,
+        reverbTone,
+        reverb,
+        reverbWet,
+      });
+    }
+
+    lineFxRef.current[lineIndex] = baseFx;
   }
   return { ctx: audioRef.current };
+};
+
+const ensureOverdriveFx = (ctx: AudioContext, fx: AudioLineFx) => {
+  if (fx.overdrive && fx.overdriveTone && fx.overdriveWet) return;
+  const overdrive = ctx.createWaveShaper();
+  const overdriveTone = ctx.createBiquadFilter();
+  const overdriveWet = ctx.createGain();
+  fx.send.connect(overdrive);
+  overdrive.connect(overdriveTone);
+  overdriveTone.connect(overdriveWet);
+  overdriveWet.connect(fx.output);
+  overdrive.oversample = fx.isLowPower ? "none" : "2x";
+  overdriveTone.type = "lowpass";
+  overdriveWet.gain.value = 0;
+  fx.overdrive = overdrive;
+  fx.overdriveTone = overdriveTone;
+  fx.overdriveWet = overdriveWet;
+};
+
+const ensureDelayFx = (ctx: AudioContext, fx: AudioLineFx) => {
+  if (fx.delaySend && fx.delayWet && fx.delay && fx.delayTone && fx.feedback) return;
+  const delaySend = ctx.createGain();
+  const delayWet = ctx.createGain();
+  const delay = ctx.createDelay(1.0);
+  const delayTone = ctx.createBiquadFilter();
+  const feedback = ctx.createGain();
+  fx.send.connect(delaySend);
+  delaySend.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(delayTone);
+  delayTone.connect(delayWet);
+  delayWet.connect(fx.output);
+  delaySend.gain.value = 0;
+  delayWet.gain.value = 0;
+  feedback.gain.value = 0;
+  delayTone.type = "lowpass";
+  fx.delaySend = delaySend;
+  fx.delayWet = delayWet;
+  fx.delay = delay;
+  fx.delayTone = delayTone;
+  fx.feedback = feedback;
+};
+
+const ensureDistortionFx = (ctx: AudioContext, fx: AudioLineFx) => {
+  if (fx.distortion && fx.distortionTone && fx.distWet) return;
+  const distortion = ctx.createWaveShaper();
+  const distortionTone = ctx.createBiquadFilter();
+  const distWet = ctx.createGain();
+  fx.send.connect(distortion);
+  distortion.connect(distortionTone);
+  distortionTone.connect(distWet);
+  distWet.connect(fx.output);
+  distortion.oversample = fx.isLowPower ? "none" : "4x";
+  distortionTone.type = "lowpass";
+  distWet.gain.value = 0;
+  fx.distortion = distortion;
+  fx.distortionTone = distortionTone;
+  fx.distWet = distWet;
+};
+
+const ensureReverbFx = (ctx: AudioContext, fx: AudioLineFx, buffer: AudioBuffer | null) => {
+  if (fx.reverbSend && fx.reverbPreDelay && fx.reverbTone && fx.reverb && fx.reverbWet) return;
+  const reverbSend = ctx.createGain();
+  const reverbPreDelay = ctx.createDelay(0.2);
+  const reverbTone = ctx.createBiquadFilter();
+  const reverb = ctx.createConvolver();
+  const reverbWet = ctx.createGain();
+  fx.send.connect(reverbSend);
+  reverbSend.connect(reverbPreDelay);
+  reverbPreDelay.connect(reverbTone);
+  reverbTone.connect(reverb);
+  reverb.connect(reverbWet);
+  reverbWet.connect(fx.output);
+  reverbTone.type = "lowpass";
+  reverb.buffer = buffer;
+  reverbSend.gain.value = 0;
+  reverbWet.gain.value = 0;
+  fx.reverbSend = reverbSend;
+  fx.reverbPreDelay = reverbPreDelay;
+  fx.reverbTone = reverbTone;
+  fx.reverb = reverb;
+  fx.reverbWet = reverbWet;
 };
 
 export const syncLineAudioState = ({
@@ -559,51 +671,67 @@ export const syncLineAudioState = ({
 
   setVoiceWaveform(fx.voice, params.waveform);
   const toneHighpassFrequency = params.waveform === "square" ? 44 : 34;
-  if (audioParamChanged(fx.voice.lastToneHighpassFrequency, toneHighpassFrequency, 0.5)) {
+  if (fx.voice.toneHighpass && audioParamChanged(fx.voice.lastToneHighpassFrequency, toneHighpassFrequency, 0.5)) {
     smoothAudioParam(fx.voice.toneHighpass.frequency, toneHighpassFrequency, now, 0.02);
     fx.voice.lastToneHighpassFrequency = toneHighpassFrequency;
   }
 
   const delayTime = params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime;
   const nextDelayTime = Math.min(1, Math.max(0, delayTime));
-  if (audioParamChanged(fx.lastDelayTime, nextDelayTime, 0.0005)) {
+  const feedbackAmount = Math.min(0.92, Math.max(0, params.delayFeedback));
+  const delayMixAmount = Math.min(1, Math.max(0, params.delayMix));
+  const delayToneFrequency = Math.min(12000, Math.max(800, params.delayTone));
+  const delayRouteAmount = delayMixAmount;
+  const delayEnabled = delayMixAmount > 0.002 || feedbackAmount > 0.002;
+  if (delayEnabled) {
+    ensureDelayFx(ctx, fx);
+  }
+  if (fx.delay && audioParamChanged(fx.lastDelayTime, nextDelayTime, 0.0005)) {
     smoothAudioParam(fx.delay.delayTime, nextDelayTime, now, 0.04);
     fx.lastDelayTime = nextDelayTime;
   }
-  const feedbackAmount = Math.min(0.92, Math.max(0, params.delayFeedback));
-  if (audioParamChanged(fx.lastFeedbackAmount, feedbackAmount)) {
-    smoothAudioParam(fx.feedback.gain, feedbackAmount, now, 0.04);
-    fx.lastFeedbackAmount = feedbackAmount;
+  if (fx.feedback && audioParamChanged(fx.lastFeedbackAmount, delayEnabled ? feedbackAmount : 0)) {
+    smoothAudioParam(fx.feedback.gain, delayEnabled ? feedbackAmount : 0, now, 0.04);
+    fx.lastFeedbackAmount = delayEnabled ? feedbackAmount : 0;
   }
-  const delayMixAmount = Math.min(1, Math.max(0, params.delayMix));
-  if (audioParamChanged(fx.lastDelayMixAmount, delayMixAmount)) {
-    smoothAudioParam(fx.delayWet.gain, delayMixAmount, now, 0.035);
-    fx.lastDelayMixAmount = delayMixAmount;
+  if (fx.delayWet && audioParamChanged(fx.lastDelayMixAmount, delayEnabled ? delayMixAmount : 0)) {
+    smoothAudioParam(fx.delayWet.gain, delayEnabled ? delayMixAmount : 0, now, 0.035);
+    fx.lastDelayMixAmount = delayEnabled ? delayMixAmount : 0;
   }
-  const delayToneFrequency = Math.min(12000, Math.max(800, params.delayTone));
-  if (audioParamChanged(fx.lastDelayTone, delayToneFrequency, 40)) {
+  if (fx.delayTone && audioParamChanged(fx.lastDelayTone, delayToneFrequency, 40)) {
     smoothAudioParam(fx.delayTone.frequency, delayToneFrequency, now, 0.035);
     fx.lastDelayTone = delayToneFrequency;
   }
+  if (fx.delaySend && audioParamChanged(fx.lastDelayRouteAmount, delayEnabled ? delayRouteAmount : 0)) {
+    smoothAudioParam(fx.delaySend.gain, delayEnabled ? delayRouteAmount : 0, now, 0.035);
+    fx.lastDelayRouteAmount = delayEnabled ? delayRouteAmount : 0;
+  }
+
   const overdriveAmount = Math.min(1, Math.max(0, params.overdrive));
-  if (Math.abs(fx.lastOverdriveAmount - overdriveAmount) > 0.002) {
+  if (overdriveAmount > 0.002) {
+    ensureOverdriveFx(ctx, fx);
+  }
+  if (fx.overdrive && fx.overdriveWet && Math.abs(fx.lastOverdriveAmount - overdriveAmount) > 0.002) {
     fx.overdrive.curve = overdriveAmount <= 0.002 ? null : getOverdriveCurve(overdriveAmount);
     smoothAudioParam(fx.overdriveWet.gain, overdriveAmount, now, 0.03);
     fx.lastOverdriveAmount = overdriveAmount;
   }
   const overdriveToneFrequency = Math.min(14000, Math.max(800, params.overdriveTone));
-  if (audioParamChanged(fx.lastOverdriveTone, overdriveToneFrequency, 40)) {
+  if (fx.overdriveTone && audioParamChanged(fx.lastOverdriveTone, overdriveToneFrequency, 40)) {
     smoothAudioParam(fx.overdriveTone.frequency, overdriveToneFrequency, now, 0.035);
     fx.lastOverdriveTone = overdriveToneFrequency;
   }
   const distortionAmount = Math.min(1, Math.max(0, params.distortion));
-  if (Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
+  if (distortionAmount > 0.002) {
+    ensureDistortionFx(ctx, fx);
+  }
+  if (fx.distortion && fx.distWet && Math.abs(fx.lastDistortionAmount - distortionAmount) > 0.002) {
     fx.distortion.curve = distortionAmount <= 0.002 ? null : getDistortionCurve(distortionAmount);
     smoothAudioParam(fx.distWet.gain, distortionAmount, now, 0.03);
     fx.lastDistortionAmount = distortionAmount;
   }
   const distortionToneFrequency = Math.min(14000, Math.max(800, params.distortionTone));
-  if (audioParamChanged(fx.lastDistortionTone, distortionToneFrequency, 40)) {
+  if (fx.distortionTone && audioParamChanged(fx.lastDistortionTone, distortionToneFrequency, 40)) {
     smoothAudioParam(fx.distortionTone.frequency, distortionToneFrequency, now, 0.035);
     fx.lastDistortionTone = distortionToneFrequency;
   }
@@ -611,24 +739,22 @@ export const syncLineAudioState = ({
   const reverbTail = Math.min(4, Math.max(0.4, params.reverbTail));
   const reverbPreDelay = Math.min(0.18, Math.max(0, params.reverbPreDelay));
   const reverbToneFrequency = Math.min(12000, Math.max(800, params.reverbTone));
-  const delayRouteAmount = delayMixAmount;
-  if (audioParamChanged(fx.lastDelayRouteAmount, delayRouteAmount)) {
-    smoothAudioParam(fx.delaySend.gain, delayRouteAmount, now, 0.035);
-    fx.lastDelayRouteAmount = delayRouteAmount;
+  if (reverbAmount > 0.002) {
+    ensureReverbFx(ctx, fx, reverbBufferRef.current);
   }
-  if (audioParamChanged(fx.lastReverbTail, reverbTail, 0.05)) {
+  if (fx.reverb && audioParamChanged(fx.lastReverbTail, reverbTail, 0.05)) {
     fx.reverb.buffer = getImpulseResponse(ctx, reverbTail);
     fx.lastReverbTail = reverbTail;
   }
-  if (audioParamChanged(fx.lastReverbPreDelay, reverbPreDelay, 0.002)) {
+  if (fx.reverbPreDelay && audioParamChanged(fx.lastReverbPreDelay, reverbPreDelay, 0.002)) {
     smoothAudioParam(fx.reverbPreDelay.delayTime, reverbPreDelay, now, 0.04);
     fx.lastReverbPreDelay = reverbPreDelay;
   }
-  if (audioParamChanged(fx.lastReverbTone, reverbToneFrequency, 40)) {
+  if (fx.reverbTone && audioParamChanged(fx.lastReverbTone, reverbToneFrequency, 40)) {
     smoothAudioParam(fx.reverbTone.frequency, reverbToneFrequency, now, 0.035);
     fx.lastReverbTone = reverbToneFrequency;
   }
-  if (audioParamChanged(fx.lastReverbAmount, reverbAmount)) {
+  if (fx.reverbSend && fx.reverbWet && audioParamChanged(fx.lastReverbAmount, reverbAmount)) {
     smoothAudioParam(fx.reverbSend.gain, reverbAmount, now, 0.035);
     smoothAudioParam(fx.reverbWet.gain, reverbAmount, now, 0.05);
     fx.lastReverbAmount = reverbAmount;
@@ -719,23 +845,31 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   const qRampTime = now + 0.012;
 
   holdAudioParam(voice.filterA.Q, now);
-  holdAudioParam(voice.filterB.Q, now);
   voice.filterA.Q.linearRampToValueAtTime(filter.qA, qRampTime);
-  voice.filterB.Q.linearRampToValueAtTime(filter.qB, qRampTime);
+  if (voice.filterB) {
+    holdAudioParam(voice.filterB.Q, now);
+    voice.filterB.Q.linearRampToValueAtTime(filter.qB, qRampTime);
+  }
 
   if (isSlideStep) {
     const slideSeconds = slideSecondsForParams(params);
+    const slideArrivalTime = now + slideSeconds;
+    const slideFilterTarget = clamp(filter.base + (step.accent ? 120 : 0), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
+    const slideGainTarget = Math.max(0.00001, amp.peak * (step.accent ? 0.98 : 0.86));
     holdAudioParam(voice.oscillator.frequency, now);
     const fromFrequency = Math.max(1, voice.lastFrequency || freq);
     voice.oscillator.frequency.setValueAtTime(fromFrequency, now);
-    voice.oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, freq), now + slideSeconds);
+    voice.oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, freq), slideArrivalTime);
 
     holdAudioParam(voice.filterA.frequency, now);
-    holdAudioParam(voice.filterB.frequency, now);
-    voice.filterA.frequency.setValueAtTime(clamp(filter.base * 1.06, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
-    voice.filterB.frequency.setValueAtTime(clamp(filter.base * 0.88, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
-    voice.filterA.frequency.setTargetAtTime(clamp(filter.tail, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now + slideSeconds * 0.45, 0.04);
-    voice.filterB.frequency.setTargetAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now + slideSeconds * 0.45, 0.05);
+    voice.filterA.frequency.linearRampToValueAtTime(slideFilterTarget, slideArrivalTime);
+    if (voice.filterB) {
+      holdAudioParam(voice.filterB.frequency, now);
+      voice.filterB.frequency.linearRampToValueAtTime(clamp(slideFilterTarget * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), slideArrivalTime);
+    }
+
+    holdAudioParam(voice.amp.gain, now);
+    voice.amp.gain.linearRampToValueAtTime(slideGainTarget, slideArrivalTime);
 
     if (releaseTime > voice.lastGateReleaseTime - 0.005) {
       releaseVoiceAtTime(voice, releaseTime, VOICE_RELEASE_SECONDS);
@@ -745,13 +879,15 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
     voice.oscillator.frequency.setValueAtTime(Math.max(1, freq), now);
 
     holdAudioParam(voice.filterA.frequency, now);
-    holdAudioParam(voice.filterB.frequency, now);
     voice.filterA.frequency.setValueAtTime(clamp(filter.base, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
-    voice.filterB.frequency.setValueAtTime(clamp(filter.base * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
     voice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.peak, filter.base + 1, MAX_FILTER_CUTOFF), peakTime);
-    voice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.peak * 0.9, filter.base + 1, MAX_FILTER_CUTOFF), peakTime);
     voice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.tail, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
-    voice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
+    if (voice.filterB) {
+      holdAudioParam(voice.filterB.frequency, now);
+      voice.filterB.frequency.setValueAtTime(clamp(filter.base * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
+      voice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.peak * 0.9, filter.base + 1, MAX_FILTER_CUTOFF), peakTime);
+      voice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
+    }
 
     holdAudioParam(voice.amp.gain, now);
     voice.amp.gain.setValueAtTime(0.00001, now);
