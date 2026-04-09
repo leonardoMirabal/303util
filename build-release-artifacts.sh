@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-${SCRIPT_DIR}/artifacts}"
 WEB_ARTIFACT_DIR="${ARTIFACTS_DIR}/web"
 APK_ARTIFACT_DIR="${ARTIFACTS_DIR}/apk"
+ICON_SOURCE_FILE="${SCRIPT_DIR}/public/icon_knob_rounded_square.svg"
 RELEASE_VERSION="${RELEASE_VERSION:-$(node -p "require(process.argv[1]).version" "${SCRIPT_DIR}/package.json")}"
 RELEASE_VERSION="${RELEASE_VERSION#v}"
 export VITE_APP_VERSION="${VITE_APP_VERSION:-${RELEASE_VERSION}}"
@@ -194,10 +195,17 @@ cp -R "${SCRIPT_DIR}/dist/." "${WEB_ARTIFACT_DIR}/"
 )
 
 echo "Building Android APK..."
-if [ ! -d "${SCRIPT_DIR}/src-tauri/gen/android" ]; then
-  echo "Initializing Android project..."
-  npx tauri android init --ci --skip-targets-install
+if [ ! -f "${ICON_SOURCE_FILE}" ]; then
+  echo "Error: Android icon source not found at ${ICON_SOURCE_FILE}"
+  exit 1
 fi
+
+echo "Regenerating native app icons from ${ICON_SOURCE_FILE}..."
+npx tauri icon "${ICON_SOURCE_FILE}" -o "${SCRIPT_DIR}/src-tauri/icons"
+
+echo "Reinitializing Android project to refresh generated launcher icons..."
+rm -rf "${SCRIPT_DIR}/src-tauri/gen/android"
+npx tauri android init --ci --skip-targets-install
 
 enforce_android_landscape
 write_android_version_properties
