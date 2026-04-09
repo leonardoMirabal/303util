@@ -13,6 +13,9 @@ ANDROID_BUILD_ARGS=(--apk --debug --ci)
 ANDROID_KEYSTORE_FILE=""
 ANDROID_KEYSTORE_PATH_RESOLVED=""
 ANDROID_APKSIGNER=""
+PACKAGE_JSON_BACKUP=""
+TAURI_CONF_BACKUP=""
+CARGO_TOML_BACKUP=""
 
 cleanup_android_signing() {
   if [ -n "${ANDROID_KEYSTORE_FILE}" ] && [ -f "${ANDROID_KEYSTORE_FILE}" ]; then
@@ -22,9 +25,49 @@ cleanup_android_signing() {
   if [ -f "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties" ]; then
     rm -f "${SCRIPT_DIR}/src-tauri/gen/android/keystore.properties"
   fi
+
+  if [ -n "${PACKAGE_JSON_BACKUP}" ] && [ -f "${PACKAGE_JSON_BACKUP}" ]; then
+    mv "${PACKAGE_JSON_BACKUP}" "${SCRIPT_DIR}/package.json"
+  fi
+
+  if [ -n "${TAURI_CONF_BACKUP}" ] && [ -f "${TAURI_CONF_BACKUP}" ]; then
+    mv "${TAURI_CONF_BACKUP}" "${SCRIPT_DIR}/src-tauri/tauri.conf.json"
+  fi
+
+  if [ -n "${CARGO_TOML_BACKUP}" ] && [ -f "${CARGO_TOML_BACKUP}" ]; then
+    mv "${CARGO_TOML_BACKUP}" "${SCRIPT_DIR}/src-tauri/Cargo.toml"
+  fi
 }
 
 trap cleanup_android_signing EXIT
+
+sync_release_version_files() {
+  PACKAGE_JSON_BACKUP="$(mktemp "${ARTIFACTS_DIR}/package.json.XXXXXX")"
+  TAURI_CONF_BACKUP="$(mktemp "${ARTIFACTS_DIR}/tauri.conf.json.XXXXXX")"
+  CARGO_TOML_BACKUP="$(mktemp "${ARTIFACTS_DIR}/Cargo.toml.XXXXXX")"
+
+  cp "${SCRIPT_DIR}/package.json" "${PACKAGE_JSON_BACKUP}"
+  cp "${SCRIPT_DIR}/src-tauri/tauri.conf.json" "${TAURI_CONF_BACKUP}"
+  cp "${SCRIPT_DIR}/src-tauri/Cargo.toml" "${CARGO_TOML_BACKUP}"
+
+  node - "${SCRIPT_DIR}/package.json" "${RELEASE_VERSION}" <<'NODE'
+const fs = require("fs");
+const [filePath, version] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+data.version = version;
+fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+NODE
+
+  node - "${SCRIPT_DIR}/src-tauri/tauri.conf.json" "${RELEASE_VERSION}" <<'NODE'
+const fs = require("fs");
+const [filePath, version] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+data.version = version;
+fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+NODE
+
+  perl -0pi -e 's/^version = ".*"$/version = "'"${RELEASE_VERSION}"'"/m' "${SCRIPT_DIR}/src-tauri/Cargo.toml"
+}
 
 write_android_version_properties() {
   local version_core prerelease_suffix prerelease_number android_version_code properties_file
@@ -140,6 +183,7 @@ fi
 mkdir -p "${ARTIFACTS_DIR}"
 rm -rf "${WEB_ARTIFACT_DIR}" "${APK_ARTIFACT_DIR}"
 mkdir -p "${WEB_ARTIFACT_DIR}" "${APK_ARTIFACT_DIR}"
+sync_release_version_files
 
 echo "Building GitHub Pages bundle..."
 bash "${SCRIPT_DIR}/prepare-dev-index.sh"
