@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
-import { ensureAudioGraph, playScheduledStep, stopAudioVoices, syncLineAudioState, type AudioLineFx } from "./audioEngine";
+import { ensureAudioGraph, playScheduledStep, prepareAudioGraph, stopAudioVoices, syncLineAudioState, type AudioLineFx } from "./audioEngine";
 import "./App.css";
 
 const STEPS = 32;
@@ -969,6 +969,7 @@ function App() {
   };
 
   const ensureAudio = (lineIndex?: number) => ensureAudioGraph(audioRef, masterRef, reverbBufferRef, lineFxRef, lineIndex);
+  const prepareAudio = () => prepareAudioGraph(audioRef, masterRef, reverbBufferRef);
 
   const placePitch = (lineIndex: number, stepIndex: number, pitch: PitchName) => {
     const line = lines[lineIndex];
@@ -1326,67 +1327,73 @@ function App() {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    let cancelled = false;
 
-    const graph = ensureAudio();
-    if (graph?.ctx.state === "suspended") {
-      void graph.ctx.resume();
-    }
-    for (let li = 0; li < lineCountRef.current; li += 1) {
-      ensureAudio(li);
-    }
-
-    resetPlaybackState();
-    const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
-    const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
-    const visibleLookaheadSeconds = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_LOOKAHEAD_SECONDS : VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
-    const visibleSchedulerIntervalMs = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_INTERVAL_MS : VISIBLE_SCHEDULER_INTERVAL_MS;
-    const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
-      if (lineIndex !== selectedLineRef.current) return;
-      if (isAndroidTauriApp) return;
-      const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
-      if (delayMs <= 8) {
-        setPlayheadValue(stepIndex);
-        return;
+    void (async () => {
+      const graph = await prepareAudio();
+      if (cancelled) return;
+      if (graph?.ctx.state === "suspended") {
+        await graph.ctx.resume();
       }
-      const timeoutId = window.setTimeout(() => {
-        scheduledPlayheadTimeoutsRef.current = scheduledPlayheadTimeoutsRef.current.filter((id) => id !== timeoutId);
-        if (selectedLineRef.current === lineIndex) {
-          setPlayheadValue(stepIndex);
-        }
-      }, delayMs);
-      scheduledPlayheadTimeoutsRef.current.push(timeoutId);
-    };
-    const tick = () => {
-      const ctx = audioRef.current;
-      if (!ctx) return;
-      const currentTime = ctx.currentTime;
-      const isHidden = document.visibilityState === "hidden";
-      const scheduleUntil = currentTime + (isHidden ? HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS : visibleLookaheadSeconds);
-      const linesNow = linesRef.current;
       for (let li = 0; li < lineCountRef.current; li += 1) {
-        const line = linesNow[li];
-        const stepSeconds = line.timingMode === "triplet" ? tripletStepSeconds : normalStepSeconds;
-        const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
-        const playableLength = playablePatternLengthForMode(voiceLength, line.timingMode);
-        if (playableLength <= 0) {
-          nextStepTimeRef.current[li] = currentTime;
-          continue;
-        }
-        let nextStepTime = Math.max(nextStepTimeRef.current[li], currentTime);
-        while (nextStepTime <= scheduleUntil) {
-          const stepIndex = voiceStepRef.current[li] % playableLength;
-          playStep(li, line, stepIndex, stepSeconds, nextStepTime);
-          schedulePlayheadUpdate(li, stepIndex, nextStepTime, currentTime);
-          voiceStepRef.current[li] += 1;
-          voiceTickRef.current[li] += 1;
-          nextStepTime += stepSeconds;
-        }
-        nextStepTimeRef.current[li] = nextStepTime;
+        ensureAudio(li);
       }
-      timerRef.current = window.setTimeout(tick, isHidden ? HIDDEN_SCHEDULER_INTERVAL_MS : visibleSchedulerIntervalMs);
-    };
-    tick();
+
+      resetPlaybackState();
+      const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
+      const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
+      const visibleLookaheadSeconds = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_LOOKAHEAD_SECONDS : VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
+      const visibleSchedulerIntervalMs = isAndroidTauriApp ? ANDROID_TAURI_SCHEDULER_INTERVAL_MS : VISIBLE_SCHEDULER_INTERVAL_MS;
+      const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
+        if (lineIndex !== selectedLineRef.current) return;
+        if (isAndroidTauriApp) return;
+        const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
+        if (delayMs <= 8) {
+          setPlayheadValue(stepIndex);
+          return;
+        }
+        const timeoutId = window.setTimeout(() => {
+          scheduledPlayheadTimeoutsRef.current = scheduledPlayheadTimeoutsRef.current.filter((id) => id !== timeoutId);
+          if (selectedLineRef.current === lineIndex) {
+            setPlayheadValue(stepIndex);
+          }
+        }, delayMs);
+        scheduledPlayheadTimeoutsRef.current.push(timeoutId);
+      };
+      const tick = () => {
+        if (cancelled) return;
+        const ctx = audioRef.current;
+        if (!ctx) return;
+        const currentTime = ctx.currentTime;
+        const isHidden = document.visibilityState === "hidden";
+        const scheduleUntil = currentTime + (isHidden ? HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS : visibleLookaheadSeconds);
+        const linesNow = linesRef.current;
+        for (let li = 0; li < lineCountRef.current; li += 1) {
+          const line = linesNow[li];
+          const stepSeconds = line.timingMode === "triplet" ? tripletStepSeconds : normalStepSeconds;
+          const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
+          const playableLength = playablePatternLengthForMode(voiceLength, line.timingMode);
+          if (playableLength <= 0) {
+            nextStepTimeRef.current[li] = currentTime;
+            continue;
+          }
+          let nextStepTime = Math.max(nextStepTimeRef.current[li], currentTime);
+          while (nextStepTime <= scheduleUntil) {
+            const stepIndex = voiceStepRef.current[li] % playableLength;
+            playStep(li, line, stepIndex, stepSeconds, nextStepTime);
+            schedulePlayheadUpdate(li, stepIndex, nextStepTime, currentTime);
+            voiceStepRef.current[li] += 1;
+            voiceTickRef.current[li] += 1;
+            nextStepTime += stepSeconds;
+          }
+          nextStepTimeRef.current[li] = nextStepTime;
+        }
+        timerRef.current = window.setTimeout(tick, isHidden ? HIDDEN_SCHEDULER_INTERVAL_MS : visibleSchedulerIntervalMs);
+      };
+      tick();
+    })();
     return () => {
+      cancelled = true;
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current);
         timerRef.current = null;

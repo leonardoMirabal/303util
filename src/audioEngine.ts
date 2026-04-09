@@ -44,7 +44,8 @@ type EngineLine = {
   params: EngineVoiceParams;
 };
 
-type AudioLineVoice = {
+type NodeAudioLineVoice = {
+  mode: "node";
   oscillator: OscillatorNode;
   preGain: GainNode;
   dcHighpass: BiquadFilterNode;
@@ -59,6 +60,19 @@ type AudioLineVoice = {
   lastTune: number;
   lastGateReleaseTime: number;
 };
+
+type WorkletAudioLineVoice = {
+  mode: "worklet";
+  node: AudioWorkletNode;
+  isLowPower: boolean;
+  lastWaveform: OscillatorType;
+  lastFrequency: number;
+  lastToneHighpassFrequency: number;
+  lastTune: number;
+  lastGateReleaseTime: number;
+};
+
+type AudioLineVoice = NodeAudioLineVoice | WorkletAudioLineVoice;
 
 export type AudioLineFx = {
   send: GainNode;
@@ -148,6 +162,11 @@ const PLAYED_NOTE_FREQUENCY: Record<string, Record<EngineTranspose, number>> = O
 const OVERDRIVE_CURVE_CACHE = new Map<number, Float32Array>();
 const DISTORTION_CURVE_CACHE = new Map<number, Float32Array>();
 const REVERB_IMPULSE_CACHE = new Map<number, AudioBuffer>();
+const WORKLET_PROCESSOR_NAME = "tb303-voice";
+const WORKLET_MODULE_PATH = `${import.meta.env.BASE_URL}audio/tb303-voice-worklet.js`;
+const WORKLET_READY_CONTEXTS = new WeakSet<AudioContext>();
+const WORKLET_FAILED_CONTEXTS = new WeakSet<AudioContext>();
+const WORKLET_LOADING_CONTEXTS = new WeakMap<AudioContext, Promise<boolean>>();
 
 const isLowPowerAudioDevice = (): boolean => {
   if (typeof window === "undefined") return false;
@@ -155,6 +174,9 @@ const isLowPowerAudioDevice = (): boolean => {
   const mobileUserAgent = /\b(Android|iPhone|iPad|iPod|Mobile)\b/i.test(window.navigator.userAgent);
   return compactViewport || mobileUserAgent;
 };
+
+const supportsAudioWorklet = (): boolean =>
+  typeof AudioWorkletNode !== "undefined" && typeof window !== "undefined" && !!window.AudioContext;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const normalize = (value: number, min: number, max: number): number => clamp((value - min) / (max - min), 0, 1);
@@ -222,7 +244,31 @@ const getImpulseResponse = (ctx: AudioContext, duration: number): AudioBuffer =>
   return impulse;
 };
 
-const makeVoice = (ctx: AudioContext, send: GainNode, lowPower = false): AudioLineVoice => {
+const ensureWorkletModule = async (ctx: AudioContext): Promise<boolean> => {
+  if (WORKLET_FAILED_CONTEXTS.has(ctx)) return false;
+  if (!supportsAudioWorklet() || !ctx.audioWorklet) return false;
+  if (WORKLET_READY_CONTEXTS.has(ctx)) return true;
+  const existing = WORKLET_LOADING_CONTEXTS.get(ctx);
+  if (existing) return existing;
+
+  const loading = ctx.audioWorklet
+    .addModule(WORKLET_MODULE_PATH)
+    .then(() => {
+      WORKLET_READY_CONTEXTS.add(ctx);
+      WORKLET_LOADING_CONTEXTS.delete(ctx);
+      return true;
+    })
+    .catch(() => {
+      WORKLET_FAILED_CONTEXTS.add(ctx);
+      WORKLET_LOADING_CONTEXTS.delete(ctx);
+      return false;
+    });
+
+  WORKLET_LOADING_CONTEXTS.set(ctx, loading);
+  return loading;
+};
+
+const makeNodeVoice = (ctx: AudioContext, send: GainNode, lowPower = false): NodeAudioLineVoice => {
   const oscillator = ctx.createOscillator();
   const preGain = ctx.createGain();
   const dcHighpass = ctx.createBiquadFilter();
@@ -264,6 +310,7 @@ const makeVoice = (ctx: AudioContext, send: GainNode, lowPower = false): AudioLi
   oscillator.start();
 
   return {
+    mode: "node",
     oscillator,
     preGain,
     dcHighpass,
@@ -275,6 +322,27 @@ const makeVoice = (ctx: AudioContext, send: GainNode, lowPower = false): AudioLi
     lastWaveform: "sawtooth",
     lastFrequency: 110,
     lastToneHighpassFrequency: toneHighpass?.frequency.value ?? 0,
+    lastTune: 0,
+    lastGateReleaseTime: 0,
+  };
+};
+
+const makeWorkletVoice = (ctx: AudioContext, send: GainNode, lowPower = false): WorkletAudioLineVoice => {
+  const node = new AudioWorkletNode(ctx, WORKLET_PROCESSOR_NAME, {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+    processorOptions: { lowPower },
+  });
+  node.connect(send);
+
+  return {
+    mode: "worklet",
+    node,
+    isLowPower: lowPower,
+    lastWaveform: "sawtooth",
+    lastFrequency: 110,
+    lastToneHighpassFrequency: 0,
     lastTune: 0,
     lastGateReleaseTime: 0,
   };
@@ -335,15 +403,23 @@ const slideSecondsForParams = (params: EngineVoiceParams): number => clamp(0.11 
 const setVoiceWaveform = (voice: AudioLineVoice, waveform: OscillatorType) => {
   const nextWaveform = voiceWaveformForParams(waveform);
   if (voice.lastWaveform === nextWaveform) return;
-  voice.oscillator.type = nextWaveform;
-  voice.preGain.gain.value = nextWaveform === "square" ? 0.72 : 0.82;
+  if (voice.mode === "node") {
+    voice.oscillator.type = nextWaveform;
+    voice.preGain.gain.value = nextWaveform === "square" ? 0.72 : 0.82;
+  } else {
+    voice.node.port.postMessage({ type: "waveform", waveform: nextWaveform });
+  }
   voice.lastWaveform = nextWaveform;
 };
 
 const releaseVoiceAtTime = (voice: AudioLineVoice, time: number, releaseSeconds = VOICE_RELEASE_SECONDS) => {
   const safeTime = Math.max(time, 0);
-  holdAudioParam(voice.amp.gain, safeTime);
-  voice.amp.gain.setTargetAtTime(0.00001, safeTime, Math.max(0.01, releaseSeconds * 0.35));
+  if (voice.mode === "node") {
+    holdAudioParam(voice.amp.gain, safeTime);
+    voice.amp.gain.setTargetAtTime(0.00001, safeTime, Math.max(0.01, releaseSeconds * 0.35));
+  } else {
+    voice.node.port.postMessage({ type: "release", time: safeTime, releaseSeconds });
+  }
   voice.lastGateReleaseTime = safeTime + releaseSeconds;
 };
 
@@ -431,14 +507,20 @@ export const ensureAudioGraph = (
     masterRef.current = master;
     reverbBufferRef.current = getImpulseResponse(ctx, 2.0);
   }
+  const ctx = audioRef.current;
+  if (!ctx) return null;
+  const shouldWaitForWorklet = supportsAudioWorklet() && !WORKLET_READY_CONTEXTS.has(ctx) && !WORKLET_FAILED_CONTEXTS.has(ctx);
+  if (shouldWaitForWorklet && !WORKLET_LOADING_CONTEXTS.has(ctx)) {
+    void ensureWorkletModule(ctx);
+  }
   if (typeof lineIndex === "number" && !lineFxRef.current[lineIndex]) {
-    const ctx = audioRef.current;
     const master = masterRef.current;
-    if (!ctx || !master) return null;
+    if (!master) return null;
+    if (shouldWaitForWorklet) return { ctx };
     const send = ctx.createGain();
     const dry = ctx.createGain();
     const output = ctx.createGain();
-    const voice = makeVoice(ctx, send, lowPower);
+    const voice = WORKLET_READY_CONTEXTS.has(ctx) ? makeWorkletVoice(ctx, send, lowPower) : makeNodeVoice(ctx, send, lowPower);
 
     send.connect(dry);
     dry.connect(output);
@@ -547,7 +629,19 @@ export const ensureAudioGraph = (
 
     lineFxRef.current[lineIndex] = baseFx;
   }
-  return { ctx: audioRef.current };
+  return { ctx };
+};
+
+export const prepareAudioGraph = async (
+  audioRef: RefLike<AudioContext | null>,
+  masterRef: RefLike<GainNode | null>,
+  reverbBufferRef: RefLike<AudioBuffer | null>,
+) => {
+  const graph = ensureAudioGraph(audioRef, masterRef, reverbBufferRef, { current: [] });
+  const ctx = graph?.ctx ?? audioRef.current;
+  if (!ctx) return null;
+  await ensureWorkletModule(ctx);
+  return { ctx };
 };
 
 const ensureOverdriveFx = (ctx: AudioContext, fx: AudioLineFx) => {
@@ -671,7 +765,7 @@ export const syncLineAudioState = ({
 
   setVoiceWaveform(fx.voice, params.waveform);
   const toneHighpassFrequency = params.waveform === "square" ? 44 : 34;
-  if (fx.voice.toneHighpass && audioParamChanged(fx.voice.lastToneHighpassFrequency, toneHighpassFrequency, 0.5)) {
+  if (fx.voice.mode === "node" && fx.voice.toneHighpass && audioParamChanged(fx.voice.lastToneHighpassFrequency, toneHighpassFrequency, 0.5)) {
     smoothAudioParam(fx.voice.toneHighpass.frequency, toneHighpassFrequency, now, 0.02);
     fx.voice.lastToneHighpassFrequency = toneHighpassFrequency;
   }
@@ -846,6 +940,36 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   const peakTime = now + filterHoldTime(gateSeconds);
   const releaseTime = now + Math.max(gateSeconds, amp.decaySeconds);
   const qRampTime = now + 0.012;
+
+  if (voice.mode === "worklet") {
+    const slideSeconds = isSlideStep ? slideSecondsForParams(params) : 0;
+    const slideFilterTarget = clamp(filter.base + (step.accent ? 180 : 60), MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF);
+    const slideGainTarget = Math.max(0.00001, amp.peak * (step.accent ? 1.02 : 0.92));
+    voice.node.port.postMessage({
+      type: "note",
+      time: now,
+      freq,
+      slide: isSlideStep,
+      slideSeconds,
+      releaseTime,
+      releaseSeconds: VOICE_RELEASE_SECONDS,
+      filterBase: filter.base,
+      filterPeak: filter.peak,
+      filterTail: filter.tail,
+      filterPeakTime: peakTime,
+      filterQ: filter.qA,
+      ampPeak: amp.peak,
+      ampSustain: Math.max(0.00001, amp.peak * amp.sustainFloor),
+      attackSeconds: amp.attackSeconds,
+      sustainTime: now + Math.max(0.035, gateSeconds * 0.38),
+      slideFilterTarget,
+      slideGainTarget,
+    });
+    voice.lastFrequency = freq;
+    voice.lastTune = params.tune;
+    voice.lastGateReleaseTime = releaseTime + VOICE_RELEASE_SECONDS;
+    return;
+  }
 
   holdAudioParam(voice.filterA.Q, now);
   voice.filterA.Q.linearRampToValueAtTime(filter.qA, qRampTime);
