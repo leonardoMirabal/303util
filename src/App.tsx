@@ -2521,7 +2521,7 @@ function App() {
     const pitchClass = toPitchClass(pitch);
     if (pitchClass === scaleRoot) return "scale-root";
     if (scalePitchClasses.has(pitchClass)) return "scale-member";
-    return "";
+    return "scale-outside";
   };
   const synthLabels = isMobileViewport
     ? { resonance: "RES", envMod: "ENV", accent: "ACC", volume: "VOL", delayTime: "TIME", feedback: "FDBK", delayMix: "MIX", overdrive: "DRV", distortion: "DIST", reverb: "REV" }
@@ -3721,23 +3721,18 @@ function App() {
                   const step = lines[selectedLine].steps[s];
                   const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
                   const isNoteStep = step.timeMode === "note" && !!step.pitch;
-                  const tieBaseStep = step.timeMode === "tie" ? findBaseStep(lines[selectedLine].steps, s) : null;
-                  if (tieBaseStep !== null) return null;
-                  const tieSpan = isNoteStep ? getTieSpanLength(lines[selectedLine].steps, s, patternLength) : 1;
-                  const gridColumn = `${s + 2} / span ${tieSpan}`;
                   const controlsDisabled = isDisabled || !isNoteStep;
                   if (!isNoteStep) {
                     return (
                       <div
                         key={`mods-${s}`}
                         className={`modifier-pad modifier-empty ${isDisabled ? "disabled" : ""}`.trim()}
-                        style={{ gridColumn }}
                         aria-hidden="true"
                       />
                     );
                   }
                   return (
-                    <div key={`mods-${s}`} className={`modifier-pad ${controlsDisabled ? "disabled" : ""}`.trim()} style={{ gridColumn }}>
+                    <div key={`mods-${s}`} className={`modifier-pad ${controlsDisabled ? "disabled" : ""}`.trim()}>
                       <button
                         type="button"
                         className={`modifier-button mod-up ${step.transpose === "up" ? "selected" : ""}`.trim()}

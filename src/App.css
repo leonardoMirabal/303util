@@ -1167,13 +1167,18 @@ button.selected {
 }
 
 .pitch-col.scale-member {
-  background: #233244;
-  color: #cfe6fb;
+  background: #3f5366;
+  color: #dce8f2;
 }
 
 .pitch-col.scale-root {
   background: #4b1e1e;
   color: #ffd4d4;
+}
+
+.pitch-col.scale-outside {
+  background: #2a2f35;
+  color: #606872;
 }
 
 .step-head {
@@ -1250,16 +1255,28 @@ button.selected {
 }
 
 .lane-time button {
-  border-radius: 4px;
+  border-radius: 0;
   padding: 0;
   min-height: 12px;
   font-size: 0.48rem;
 }
 
+.lane-time button.lane-time-note.selected {
+  background: #d9dee5;
+  border-color: #fafcff;
+  color: #101215;
+}
+
 .lane-time button.lane-time-tie.selected {
-  background: #7f6fd9;
-  border-color: #d9d1ff;
-  color: #100d22;
+  background: #f0c43a;
+  border-color: #f4df94;
+  color: #17130a;
+}
+
+.lane-time button.lane-time-rest.selected {
+  background: #df6262;
+  border-color: #ffd0d0;
+  color: #220808;
 }
 
 .modifier-row {
@@ -1273,7 +1290,7 @@ button.selected {
   min-height: 78px;
   padding: 3px;
   border: 1px solid #2c333b;
-  border-radius: 4px;
+  border-radius: 0;
   background: #1e2329;
 }
 
@@ -1296,7 +1313,7 @@ button.selected {
 .modifier-button {
   min-width: 0;
   min-height: 34px;
-  border-radius: 3px;
+  border-radius: 0;
   padding: 0;
   border: 1px solid #3a434d;
   background: linear-gradient(180deg, #343c45 0%, #232930 100%);
@@ -1351,14 +1368,20 @@ button.selected {
 }
 
 .cell.scale-member {
-  background: #172331;
-  border-color: #2d455a;
+  background: #314355;
+  border-color: #5c7590;
 }
 
 .cell.scale-root {
   background: #2a1719;
   border-color: #6e383d;
   color: #f0c8cb;
+}
+
+.cell.scale-outside {
+  background: #2a2f35;
+  border-color: #353b43;
+  color: #606872;
 }
 
 .cell.note {
@@ -1369,8 +1392,8 @@ button.selected {
 }
 
 .cell.note.scale-member {
-  background: #85aeca;
-  border-color: #deeffc;
+  background: #8db4ce;
+  border-color: #deedf8;
   color: #0d151b;
 }
 
