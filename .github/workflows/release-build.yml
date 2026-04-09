@@ -8,6 +8,9 @@ on:
     paths-ignore:
       - README.md
       - docs/**
+      - .gitignore
+      - .github/workflows/release-build.yml
+      - src-tauri/.gitignore
 
 permissions:
   contents: write
