@@ -54,6 +54,7 @@ type AudioLineVoice = {
   amp: GainNode;
   lastWaveform: OscillatorType;
   lastFrequency: number;
+  lastToneHighpassFrequency: number;
   lastTune: number;
   lastGateReleaseTime: number;
 };
@@ -255,6 +256,7 @@ const makeVoice = (ctx: AudioContext, send: GainNode): AudioLineVoice => {
     amp,
     lastWaveform: "sawtooth",
     lastFrequency: 110,
+    lastToneHighpassFrequency: 34,
     lastTune: 0,
     lastGateReleaseTime: 0,
   };
@@ -276,7 +278,6 @@ const holdAudioParam = (param: AudioParam, now: number) => {
     return;
   }
   param.cancelScheduledValues(now);
-  param.setValueAtTime(param.value, now);
 };
 
 const smoothAudioParam = (param: AudioParam, next: number, now: number, rampSeconds = 0.03) => {
@@ -558,7 +559,10 @@ export const syncLineAudioState = ({
 
   setVoiceWaveform(fx.voice, params.waveform);
   const toneHighpassFrequency = params.waveform === "square" ? 44 : 34;
-  smoothAudioParam(fx.voice.toneHighpass.frequency, toneHighpassFrequency, now, 0.02);
+  if (audioParamChanged(fx.voice.lastToneHighpassFrequency, toneHighpassFrequency, 0.5)) {
+    smoothAudioParam(fx.voice.toneHighpass.frequency, toneHighpassFrequency, now, 0.02);
+    fx.voice.lastToneHighpassFrequency = toneHighpassFrequency;
+  }
 
   const delayTime = params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime;
   const nextDelayTime = Math.min(1, Math.max(0, delayTime));
