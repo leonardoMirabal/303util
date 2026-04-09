@@ -6,8 +6,6 @@ With **303 util**, you can sketch, edit, and compare sequences quickly, work on 
 
 The goal of the app is **not** to be a perfect sonic emulator of the TB-303. Its main purpose is pattern creation and documentation. Where it really shines is in helping you design patterns clearly, then export a clean sheet you can use to transfer those ideas back to a real 303 later, using the original hardware programming method if you want. In that sense, it is a workflow tool made by and for people who love the TB-303, including the old painful way of entering patterns, but want a better way to get there.
 
-The original sound engine code is based on [thedjinn/js303](https://github.com/thedjinn/js303).
-
 ![Desktop editor overview](docs/screenshots/desktop-editor-overview.png)
 
 ## Quick start
