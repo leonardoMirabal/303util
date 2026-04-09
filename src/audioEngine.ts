@@ -44,6 +44,20 @@ type EngineLine = {
   params: EngineVoiceParams;
 };
 
+type AudioLineVoice = {
+  oscillator: OscillatorNode;
+  preGain: GainNode;
+  dcHighpass: BiquadFilterNode;
+  filterA: BiquadFilterNode;
+  filterB: BiquadFilterNode;
+  toneHighpass: BiquadFilterNode;
+  amp: GainNode;
+  lastWaveform: OscillatorType;
+  lastFrequency: number;
+  lastTune: number;
+  lastGateReleaseTime: number;
+};
+
 export type AudioLineFx = {
   send: GainNode;
   dry: GainNode;
@@ -64,6 +78,7 @@ export type AudioLineFx = {
   reverbTone: BiquadFilterNode;
   reverb: ConvolverNode;
   reverbWet: GainNode;
+  voice: AudioLineVoice;
   lastDelayTime: number;
   lastFeedbackAmount: number;
   lastDelayMixAmount: number;
@@ -112,6 +127,9 @@ const noteToFrequency = (note: string): number => 440 * 2 ** ((noteToMidi(note) 
 const NOTE_FREQUENCY_BY_PITCH = Object.fromEntries(PITCHES.map((pitch) => [pitch, noteToFrequency(pitch)])) as Record<string, number>;
 const MASTER_OUTPUT_GAIN = 0.68;
 const LINE_OUTPUT_HEADROOM_GAIN = 0.62;
+const MIN_FILTER_CUTOFF = 70;
+const MAX_FILTER_CUTOFF = 5200;
+const VOICE_RELEASE_SECONDS = 0.06;
 
 const PLAYED_NOTE_FREQUENCY: Record<string, Record<EngineTranspose, number>> = Object.fromEntries(
   PITCHES.map((pitch) => [
@@ -126,6 +144,10 @@ const PLAYED_NOTE_FREQUENCY: Record<string, Record<EngineTranspose, number>> = O
 
 const OVERDRIVE_CURVE_CACHE = new Map<number, Float32Array>();
 const DISTORTION_CURVE_CACHE = new Map<number, Float32Array>();
+const REVERB_IMPULSE_CACHE = new Map<number, AudioBuffer>();
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const normalize = (value: number, min: number, max: number): number => clamp((value - min) / (max - min), 0, 1);
 
 const makeOverdriveCurve = (amount: number) => {
   const samples = 256;
@@ -167,8 +189,6 @@ const getDistortionCurve = (amount: number): Float32Array => {
   return curve;
 };
 
-const REVERB_IMPULSE_CACHE = new Map<number, AudioBuffer>();
-
 const makeImpulseResponse = (ctx: AudioContext, duration: number) => {
   const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
   const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
@@ -192,7 +212,56 @@ const getImpulseResponse = (ctx: AudioContext, duration: number): AudioBuffer =>
   return impulse;
 };
 
-export const delayTimeFromTempo = (tempo: number, subdivision: EngineDelaySubdivision): number => (60 / tempo) * (DELAY_SUBDIVISION_BEATS[subdivision] ?? 0.5);
+const makeVoice = (ctx: AudioContext, send: GainNode): AudioLineVoice => {
+  const oscillator = ctx.createOscillator();
+  const preGain = ctx.createGain();
+  const dcHighpass = ctx.createBiquadFilter();
+  const filterA = ctx.createBiquadFilter();
+  const filterB = ctx.createBiquadFilter();
+  const toneHighpass = ctx.createBiquadFilter();
+  const amp = ctx.createGain();
+
+  oscillator.type = "sawtooth";
+  oscillator.frequency.value = 110;
+  preGain.gain.value = 0.82;
+  dcHighpass.type = "highpass";
+  dcHighpass.frequency.value = 26;
+  filterA.type = "lowpass";
+  filterB.type = "lowpass";
+  filterA.frequency.value = 320;
+  filterB.frequency.value = 280;
+  filterA.Q.value = 1.1;
+  filterB.Q.value = 0.9;
+  toneHighpass.type = "highpass";
+  toneHighpass.frequency.value = 34;
+  amp.gain.value = 0.00001;
+
+  oscillator.connect(preGain);
+  preGain.connect(dcHighpass);
+  dcHighpass.connect(filterA);
+  filterA.connect(filterB);
+  filterB.connect(toneHighpass);
+  toneHighpass.connect(amp);
+  amp.connect(send);
+  oscillator.start();
+
+  return {
+    oscillator,
+    preGain,
+    dcHighpass,
+    filterA,
+    filterB,
+    toneHighpass,
+    amp,
+    lastWaveform: "sawtooth",
+    lastFrequency: 110,
+    lastTune: 0,
+    lastGateReleaseTime: 0,
+  };
+};
+
+export const delayTimeFromTempo = (tempo: number, subdivision: EngineDelaySubdivision): number =>
+  (60 / tempo) * (DELAY_SUBDIVISION_BEATS[subdivision] ?? 0.5);
 
 const playablePatternLengthForMode = (patternLength: number, mode: EnginePatternTimingMode): number =>
   mode === "triplet" ? Math.max(1, patternLength - Math.floor(patternLength / 4)) : patternLength;
@@ -213,6 +282,108 @@ const holdAudioParam = (param: AudioParam, now: number) => {
 const smoothAudioParam = (param: AudioParam, next: number, now: number, rampSeconds = 0.03) => {
   holdAudioParam(param, now);
   param.linearRampToValueAtTime(next, now + rampSeconds);
+};
+
+const voiceWaveformForParams = (waveform: OscillatorType): OscillatorType => (waveform === "square" ? "square" : "sawtooth");
+
+const tuneMultiplier = (tune: number): number => 2 ** (tune / 12);
+
+const cutoffContour = (params: EngineVoiceParams, accented: boolean) => {
+  const cutoffNorm = normalize(params.cutoff, 180, 2400);
+  const resonanceNorm = normalize(params.resonance, 0, 22);
+  const accentNorm = accented ? normalize(params.accent, 1, 2.5) : 0;
+  const base = MIN_FILTER_CUTOFF + cutoffNorm ** 2.05 * 1900 + resonanceNorm * 110;
+  const envDepth = 160 + params.envMod * (0.82 + accentNorm * 0.48);
+  const peak = clamp(base + envDepth, base + 60, MAX_FILTER_CUTOFF);
+  const tail = clamp(base * (0.66 + resonanceNorm * 0.06) + accentNorm * 90, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF * 0.82);
+  const qA = 0.9 + resonanceNorm ** 1.45 * 21;
+  const qB = 0.85 + resonanceNorm ** 1.2 * 8.5;
+  return { base, peak, tail, qA, qB };
+};
+
+const ampContour = (params: EngineVoiceParams, accented: boolean) => {
+  const accentNorm = accented ? normalize(params.accent, 1, 2.5) : 0;
+  const attackSeconds = accented ? 0.0025 : 0.0035;
+  const decaySeconds = clamp(params.decay * (accented ? 0.9 : 1), 0.06, 0.8);
+  const sustainFloor = 0.18 + accentNorm * 0.1;
+  const peak = clamp(params.volume * (accented ? 1.06 + accentNorm * 0.12 : 1), 0, 0.72);
+  return { attackSeconds, decaySeconds, sustainFloor, peak };
+};
+
+const filterHoldTime = (gateSeconds: number): number => Math.max(0.025, gateSeconds * 0.18);
+const slideSecondsForParams = (params: EngineVoiceParams): number => clamp(0.045 + params.decay * 0.22, 0.055, 0.16);
+
+const setVoiceWaveform = (voice: AudioLineVoice, waveform: OscillatorType) => {
+  const nextWaveform = voiceWaveformForParams(waveform);
+  if (voice.lastWaveform === nextWaveform) return;
+  voice.oscillator.type = nextWaveform;
+  voice.preGain.gain.value = nextWaveform === "square" ? 0.72 : 0.82;
+  voice.lastWaveform = nextWaveform;
+};
+
+const releaseVoiceAtTime = (voice: AudioLineVoice, time: number, releaseSeconds = VOICE_RELEASE_SECONDS) => {
+  const safeTime = Math.max(time, 0);
+  holdAudioParam(voice.amp.gain, safeTime);
+  voice.amp.gain.setTargetAtTime(0.00001, safeTime, Math.max(0.01, releaseSeconds * 0.35));
+  voice.lastGateReleaseTime = safeTime + releaseSeconds;
+};
+
+const getPreviousSoundingBaseStep = <TStep extends EngineStep>(
+  steps: TStep[],
+  stepIndex: number,
+  findBaseStep: (steps: TStep[], step: number) => number | null,
+): number | null => {
+  if (stepIndex <= 0) return null;
+  if (steps[stepIndex - 1].timeMode === "rest") return null;
+  return findBaseStep(steps, stepIndex - 1);
+};
+
+const shouldSlideIntoStep = <TStep extends EngineStep>(
+  steps: TStep[],
+  stepIndex: number,
+  findBaseStep: (steps: TStep[], step: number) => number | null,
+): boolean => {
+  const current = steps[stepIndex];
+  if (current.timeMode !== "note" || !current.pitch) return false;
+  const previousBaseStep = getPreviousSoundingBaseStep(steps, stepIndex, findBaseStep);
+  if (previousBaseStep === null) return false;
+  const previous = steps[previousBaseStep];
+  return previous.timeMode === "note" && !!previous.pitch && previous.slide;
+};
+
+const getSequencedGateSteps = <TStep extends EngineStep>(
+  steps: TStep[],
+  stepIndex: number,
+  playableLength: number,
+  findBaseStep: (steps: TStep[], step: number) => number | null,
+): number => {
+  let noteSteps = 1;
+  for (let s = stepIndex + 1; s < playableLength; s += 1) {
+    if (steps[s].timeMode === "tie") {
+      noteSteps += 1;
+      continue;
+    }
+    break;
+  }
+
+  let gateSteps = noteSteps;
+  let sourceStepIndex = stepIndex;
+  let cursor = stepIndex + noteSteps;
+  while (cursor < playableLength) {
+    const sourceStep = steps[sourceStepIndex];
+    if (sourceStep.timeMode !== "note" || !sourceStep.pitch || !sourceStep.slide) break;
+    const next = steps[cursor];
+    if (next.timeMode !== "note" || !next.pitch || !shouldSlideIntoStep(steps, cursor, findBaseStep)) break;
+    gateSteps += 1;
+    sourceStepIndex = cursor;
+    cursor += 1;
+    while (cursor < playableLength && steps[cursor].timeMode === "tie") {
+      gateSteps += 1;
+      cursor += 1;
+    }
+  }
+
+  return gateSteps;
 };
 
 export const ensureAudioGraph = (
@@ -263,6 +434,7 @@ export const ensureAudioGraph = (
     const reverbTone = ctx.createBiquadFilter();
     const reverb = ctx.createConvolver();
     const reverbWet = ctx.createGain();
+    const voice = makeVoice(ctx, send);
 
     send.connect(dry);
     dry.connect(output);
@@ -328,6 +500,7 @@ export const ensureAudioGraph = (
       reverbTone,
       reverb,
       reverbWet,
+      voice,
       lastDelayTime: Number.NaN,
       lastFeedbackAmount: Number.NaN,
       lastDelayMixAmount: Number.NaN,
@@ -382,6 +555,10 @@ export const syncLineAudioState = ({
     smoothAudioParam(fx.output.gain, outputGain, now, 0.03);
     fx.lastOutputGain = outputGain;
   }
+
+  setVoiceWaveform(fx.voice, params.waveform);
+  const toneHighpassFrequency = params.waveform === "square" ? 44 : 34;
+  smoothAudioParam(fx.voice.toneHighpass.frequency, toneHighpassFrequency, now, 0.02);
 
   const delayTime = params.delaySync ? delayTimeFromTempo(tempo, params.delaySubdivision) : params.delayTime;
   const nextDelayTime = Math.min(1, Math.max(0, delayTime));
@@ -456,6 +633,20 @@ export const syncLineAudioState = ({
   return { ctx, fx };
 };
 
+export const stopAudioVoices = (
+  audioRef: RefLike<AudioContext | null>,
+  lineFxRef: RefLike<Array<AudioLineFx | null>>,
+  atTime?: number,
+) => {
+  const ctx = audioRef.current;
+  if (!ctx) return;
+  const now = atTime ?? ctx.currentTime;
+  for (const fx of lineFxRef.current) {
+    if (!fx) continue;
+    releaseVoiceAtTime(fx.voice, now, 0.045);
+  }
+};
+
 export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<EngineLine, "steps"> & { steps: TStep[] }>({
   lineIndex,
   line,
@@ -496,12 +687,6 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
   }
   if (!fx) return;
 
-  let noteSteps = 1;
-  for (let s = stepIndex + 1; s < playableLength; s += 1) {
-    if (steps[s].timeMode === "tie") noteSteps += 1;
-    else break;
-  }
-
   const now = startTime ?? ctx.currentTime;
   syncLineAudioState({
     lineIndex,
@@ -513,55 +698,64 @@ export const playScheduledStep = <TStep extends EngineStep, TLine extends Omit<E
     lineFxRef,
     atTime: now,
   });
+
+  const voice = fx.voice;
+  setVoiceWaveform(voice, params.waveform);
+
   const transposeFrequency = PLAYED_NOTE_FREQUENCY[step.pitch];
   if (!transposeFrequency) return;
-  const accentBoost = step.accent ? params.accent : 1;
-  const targetGain = Math.max(0, params.volume * accentBoost);
-  if (targetGain <= 0.0001) return;
-  const freq = transposeFrequency[step.transpose];
-  const osc = ctx.createOscillator();
-  const filter = ctx.createBiquadFilter();
-  const amp = ctx.createGain();
-  const accentFilterBoost = step.accent ? 1.9 : 1;
-  osc.type = params.waveform;
-  osc.frequency.setValueAtTime(freq, now);
+  const freq = transposeFrequency[step.transpose] * tuneMultiplier(params.tune);
+  const isSlideStep = shouldSlideIntoStep(steps, stepIndex, findBaseStep);
+  const gateSteps = getSequencedGateSteps(steps, stepIndex, playableLength, findBaseStep);
+  const gateSeconds = Math.max(0.11, gateSteps * stepLenSeconds * 0.98);
+  const amp = ampContour(params, step.accent);
+  const filter = cutoffContour(params, step.accent);
+  const peakTime = now + filterHoldTime(gateSeconds);
+  const releaseTime = now + Math.max(gateSeconds, amp.decaySeconds);
+  const qRampTime = now + 0.012;
 
-  if (step.slide) {
-    const prevIdx = (stepIndex - 1 + playableLength) % playableLength;
-    const prevBase = findBaseStep(steps, prevIdx);
-    if (prevBase !== null) {
-      const prevStep = steps[prevBase];
-      if (prevStep.pitch) {
-        const prevTransposeFrequency = PLAYED_NOTE_FREQUENCY[prevStep.pitch];
-        if (prevTransposeFrequency) {
-          const prevFreq = prevTransposeFrequency[prevStep.transpose];
-          osc.frequency.setValueAtTime(prevFreq, now);
-          osc.frequency.linearRampToValueAtTime(freq, now + Math.min(0.2, params.decay * 0.8 + 0.06));
-        }
-      }
+  holdAudioParam(voice.filterA.Q, now);
+  holdAudioParam(voice.filterB.Q, now);
+  voice.filterA.Q.linearRampToValueAtTime(filter.qA, qRampTime);
+  voice.filterB.Q.linearRampToValueAtTime(filter.qB, qRampTime);
+
+  if (isSlideStep) {
+    const slideSeconds = slideSecondsForParams(params);
+    holdAudioParam(voice.oscillator.frequency, now);
+    const fromFrequency = Math.max(1, voice.lastFrequency || freq);
+    voice.oscillator.frequency.setValueAtTime(fromFrequency, now);
+    voice.oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, freq), now + slideSeconds);
+
+    holdAudioParam(voice.filterA.frequency, now);
+    holdAudioParam(voice.filterB.frequency, now);
+    voice.filterA.frequency.setValueAtTime(clamp(filter.base * 1.06, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
+    voice.filterB.frequency.setValueAtTime(clamp(filter.base * 0.88, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
+    voice.filterA.frequency.setTargetAtTime(clamp(filter.tail, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now + slideSeconds * 0.45, 0.04);
+    voice.filterB.frequency.setTargetAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now + slideSeconds * 0.45, 0.05);
+
+    if (releaseTime > voice.lastGateReleaseTime - 0.005) {
+      releaseVoiceAtTime(voice, releaseTime, VOICE_RELEASE_SECONDS);
     }
+  } else {
+    holdAudioParam(voice.oscillator.frequency, now);
+    voice.oscillator.frequency.setValueAtTime(Math.max(1, freq), now);
+
+    holdAudioParam(voice.filterA.frequency, now);
+    holdAudioParam(voice.filterB.frequency, now);
+    voice.filterA.frequency.setValueAtTime(clamp(filter.base, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
+    voice.filterB.frequency.setValueAtTime(clamp(filter.base * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), now);
+    voice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.peak, filter.base + 1, MAX_FILTER_CUTOFF), peakTime);
+    voice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.peak * 0.9, filter.base + 1, MAX_FILTER_CUTOFF), peakTime);
+    voice.filterA.frequency.exponentialRampToValueAtTime(clamp(filter.tail, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
+    voice.filterB.frequency.exponentialRampToValueAtTime(clamp(filter.tail * 0.84, MIN_FILTER_CUTOFF, MAX_FILTER_CUTOFF), releaseTime);
+
+    holdAudioParam(voice.amp.gain, now);
+    voice.amp.gain.setValueAtTime(0.00001, now);
+    voice.amp.gain.linearRampToValueAtTime(Math.max(0.00001, amp.peak), now + amp.attackSeconds);
+    voice.amp.gain.exponentialRampToValueAtTime(Math.max(0.00001, amp.peak * amp.sustainFloor), now + Math.max(0.035, gateSeconds * 0.38));
+    releaseVoiceAtTime(voice, releaseTime, VOICE_RELEASE_SECONDS);
   }
 
-  filter.type = "lowpass";
-  filter.Q.setValueAtTime(Math.min(30, params.resonance * accentFilterBoost), now);
-  filter.frequency.setValueAtTime(params.cutoff, now);
-  filter.frequency.exponentialRampToValueAtTime(Math.max(220, params.cutoff + params.envMod * accentFilterBoost), now + 0.02);
-  filter.frequency.exponentialRampToValueAtTime(Math.max(140, params.cutoff * 0.58), now + params.decay * noteSteps);
-
-  const gate = Math.max(0.12, noteSteps * stepLenSeconds * 0.92);
-  amp.gain.setValueAtTime(0.0001, now);
-  amp.gain.linearRampToValueAtTime(targetGain, now + 0.005);
-  amp.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(gate, params.decay * noteSteps));
-
-  osc.connect(filter);
-  filter.connect(amp);
-  amp.connect(fx.send);
-  osc.onended = () => {
-    osc.disconnect();
-    filter.disconnect();
-    amp.disconnect();
-  };
-
-  osc.start(now);
-  osc.stop(now + gate + 0.08);
+  voice.lastFrequency = freq;
+  voice.lastTune = params.tune;
 };

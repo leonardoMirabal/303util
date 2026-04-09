@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
-import { ensureAudioGraph, playScheduledStep, syncLineAudioState, type AudioLineFx } from "./audioEngine";
+import { ensureAudioGraph, playScheduledStep, stopAudioVoices, syncLineAudioState, type AudioLineFx } from "./audioEngine";
 import "./App.css";
 
 const STEPS = 32;
@@ -1389,6 +1389,11 @@ function App() {
       clearScheduledPlayheadUpdates();
     };
   }, [isPlaying, tempo]);
+
+  useEffect(() => {
+    if (isPlaying) return;
+    stopAudioVoices(audioRef, lineFxRef);
+  }, [isPlaying]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -3710,59 +3715,70 @@ function App() {
               id="mobile-modifier-controls"
               className={`top-lanes ${isMobileViewport && !mobileModifiersOpen ? "mobile-collapsed" : ""}`}
             >
-              <div className="lane-row">
-                <div className="lane-label">DOWN</div>
+              <div className="lane-row modifier-row">
+                <div className="lane-label">MOD</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
                   const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
-                  const enabled = step.timeMode === "note" && step.pitch && step.transpose === "down";
+                  const isNoteStep = step.timeMode === "note" && !!step.pitch;
+                  const tieBaseStep = step.timeMode === "tie" ? findBaseStep(lines[selectedLine].steps, s) : null;
+                  if (tieBaseStep !== null) return null;
+                  const tieSpan = isNoteStep ? getTieSpanLength(lines[selectedLine].steps, s, patternLength) : 1;
+                  const gridColumn = `${s + 2} / span ${tieSpan}`;
+                  const controlsDisabled = isDisabled || !isNoteStep;
+                  if (!isNoteStep) {
+                    return (
+                      <div
+                        key={`mods-${s}`}
+                        className={`modifier-pad modifier-empty ${isDisabled ? "disabled" : ""}`.trim()}
+                        style={{ gridColumn }}
+                        aria-hidden="true"
+                      />
+                    );
+                  }
                   return (
-                    <button key={`dn-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleTranspose(selectedLine, s, "down")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
-                      {enabled ? "ON" : "--"}
-                    </button>
+                    <div key={`mods-${s}`} className={`modifier-pad ${controlsDisabled ? "disabled" : ""}`.trim()} style={{ gridColumn }}>
+                      <button
+                        type="button"
+                        className={`modifier-button mod-up ${step.transpose === "up" ? "selected" : ""}`.trim()}
+                        onClick={() => toggleTranspose(selectedLine, s, "up")}
+                        disabled={controlsDisabled}
+                        aria-label={`Step ${s + 1} up octave`}
+                      >
+                        U
+                      </button>
+                      <button
+                        type="button"
+                        className={`modifier-button mod-down ${step.transpose === "down" ? "selected" : ""}`.trim()}
+                        onClick={() => toggleTranspose(selectedLine, s, "down")}
+                        disabled={controlsDisabled}
+                        aria-label={`Step ${s + 1} down octave`}
+                      >
+                        D
+                      </button>
+                      <button
+                        type="button"
+                        className={`modifier-button mod-accent ${step.accent ? "selected" : ""}`.trim()}
+                        onClick={() => toggleFlag(selectedLine, s, "accent")}
+                        disabled={controlsDisabled}
+                        aria-label={`Step ${s + 1} accent`}
+                      >
+                        A
+                      </button>
+                      <button
+                        type="button"
+                        className={`modifier-button mod-slide ${step.slide ? "selected" : ""}`.trim()}
+                        onClick={() => toggleFlag(selectedLine, s, "slide")}
+                        disabled={controlsDisabled}
+                        aria-label={`Step ${s + 1} slide`}
+                      >
+                        S
+                      </button>
+                    </div>
                   );
                 })}
               </div>
-              <div className="lane-row">
-                <div className="lane-label">UP</div>
-                {Array.from({ length: patternLength }, (_, s) => {
-                  const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
-                  const enabled = step.timeMode === "note" && step.pitch && step.transpose === "up";
-                  return (
-                    <button key={`up-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleTranspose(selectedLine, s, "up")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
-                      {enabled ? "ON" : "--"}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="lane-row">
-                <div className="lane-label">ACC</div>
-                {Array.from({ length: patternLength }, (_, s) => {
-                  const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
-                  const enabled = step.timeMode === "note" && step.pitch && step.accent;
-                  return (
-                    <button key={`acc-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleFlag(selectedLine, s, "accent")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
-                      {enabled ? "ON" : "--"}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="lane-row">
-                <div className="lane-label">SLIDE</div>
-                {Array.from({ length: patternLength }, (_, s) => {
-                  const step = lines[selectedLine].steps[s];
-                  const isDisabled = isStepDisabledForTimingMode(s, patternLength, selectedTimingMode);
-                  const enabled = step.timeMode === "note" && step.pitch && step.slide;
-                  return (
-                    <button key={`sl-${s}`} className={`lane-cell ${enabled ? "active" : ""} ${isDisabled ? "disabled" : ""}`.trim()} onClick={() => toggleFlag(selectedLine, s, "slide")} disabled={isDisabled || step.timeMode !== "note" || !step.pitch}>
-                      {enabled ? "ON" : "--"}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="lane-row">
+              <div className="lane-row time-row">
                 <div className="lane-label">TIME</div>
                 {Array.from({ length: patternLength }, (_, s) => {
                   const step = lines[selectedLine].steps[s];
