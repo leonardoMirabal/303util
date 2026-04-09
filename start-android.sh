@@ -97,8 +97,8 @@ refresh_android_project() {
 if [ ! -d "${EXPECTED_ANDROID_PACKAGE_DIR}" ]; then
   echo "Android project package path is stale or missing:"
   echo "  expected ${EXPECTED_ANDROID_PACKAGE_DIR}"
-  refresh_android_project
 fi
+refresh_android_project
 
 GRADLE_APP_FILE="${SCRIPT_DIR}/src-tauri/gen/android/app/build.gradle.kts"
 if [ -f "${GRADLE_APP_FILE}" ]; then
