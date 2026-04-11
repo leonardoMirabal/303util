@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@choochmeque/tauri-plugin-google-auth-api": "^0.5.1",
+    "@kingsword/tauri-plugin-android-package-install": "npm:@jsr/kingsword__tauri-plugin-android-package-install@^2.0.2",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "build": "^0.1.4",
