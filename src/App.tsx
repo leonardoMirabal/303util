@@ -946,8 +946,8 @@ const drawExportKnob = (
   ctx.stroke();
 
   ctx.fillStyle = "#111";
-  ctx.font = "700 18px Arial";
-  ctx.fillText(label, cx, cy - radius - 24);
+  ctx.font = "700 17px Arial";
+  ctx.fillText(label, cx, cy - radius - 16);
   ctx.restore();
 };
 
@@ -971,8 +971,8 @@ const drawWaveformPreview = (
   variants.forEach((variant, index) => {
     const itemX = x + index * (itemWidth + itemGap);
     const active = waveform === variant.key;
-    const iconWidth = itemWidth * 0.16;
-    const iconHeight = height * 0.2;
+    const iconWidth = itemWidth * 0.12;
+    const iconHeight = height * 0.16;
     const iconLeft = itemX + (itemWidth - iconWidth) / 2;
     const iconRight = iconLeft + iconWidth;
     const iconTop = y + (height - iconHeight) / 2;
@@ -1126,16 +1126,19 @@ const drawVoiceSheet = (
   ctx.lineWidth = 4;
   ctx.strokeRect(12, 12, width - 24, height - 24);
 
-  const metaX = width - margin - 360;
+  const metaWidth = 360;
+  const metaX = width - margin - metaWidth;
+  const brandWidth = 128;
+  const brandDividerX = margin + brandWidth;
   const logoSize = 92;
-  const logoX = margin + 14;
-  const logoY = margin + 14;
-  const headerTextX = logoX + logoSize + 20;
-  const headerTitleY = margin + 56;
+  const logoX = margin + Math.round((brandWidth - logoSize) / 2);
+  const logoY = margin + Math.round((headerHeight - logoSize) / 2);
+  const headerTextX = brandDividerX + 24;
+  const headerTitleY = margin + 60;
   const headerVoiceY = margin + 96;
 
   ctx.fillStyle = "#111";
-  ctx.font = "700 32px Arial";
+  ctx.font = "700 34px Arial";
   ctx.textBaseline = "alphabetic";
   ctx.fillText(programName.trim() || "pattern", headerTextX, headerTitleY);
   ctx.font = "700 18px Arial";
@@ -1143,6 +1146,10 @@ const drawVoiceSheet = (
 
   ctx.strokeRect(margin, margin, width - margin * 2, headerHeight);
   drawSheetAppLogo(ctx, { x: logoX, y: logoY, size: logoSize });
+  ctx.beginPath();
+  ctx.moveTo(brandDividerX, margin);
+  ctx.lineTo(brandDividerX, margin + headerHeight);
+  ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(metaX, margin);
   ctx.lineTo(metaX, margin + headerHeight);
@@ -1288,7 +1295,7 @@ const drawVoiceSheet = (
     { label: "Decay", valueText: voice.params.decay.toFixed(2), normalized: (voice.params.decay - 0.08) / (0.6 - 0.08) },
     { label: "Accent", valueText: voice.params.accent.toFixed(2), normalized: (voice.params.accent - 1) / (2.5 - 1) },
   ];
-  const knobCenterY = footerTop + footerHeight / 2 + 2;
+  const knobCenterY = footerTop + footerHeight / 2 + 8;
   const knobRadius = Math.min(24, Math.max(18, knobAreaWidth / 22));
   const knobSpacing = knobAreaWidth / knobSpecs.length;
 
