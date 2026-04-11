@@ -7,3 +7,5 @@ src-tauri/target-android-dev/aarch64-linux-android/**
 src-tauri/target-android-dev/aarch64-linux-android
 src-tauri/target-android-dev/debug
 src-tauri/target-android-dev/debug/**
+src-tauri/.DS_Store
+.DS_Store

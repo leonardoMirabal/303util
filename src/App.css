@@ -1474,6 +1474,35 @@ button.selected {
   margin-bottom: 3px;
 }
 
+.sheet-notes-editor {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sheet-notes-editor label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #eef2f6;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sheet-notes-editor textarea {
+  width: 100%;
+  min-height: 52px;
+  resize: none;
+  overflow: hidden;
+  padding: 8px 10px;
+  border: 1px solid #7e8894;
+  border-radius: 6px;
+  background: #2f353d;
+  color: #f7fafc;
+  font-size: 0.92rem;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
 .sheet-preview-wrap {
   background: #d9d9d9;
   border: 1px solid #8d8d8d;

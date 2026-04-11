@@ -92,6 +92,7 @@ type UpdateDialogState =
 type ProjectData = {
   version: 1;
   programName: string;
+  notes?: string;
   lineCount: 1 | 2 | 3;
   scalePresetId?: string;
   scaleRoot?: PitchClass;
@@ -313,7 +314,8 @@ const makeLine = (): LineState => ({
 const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   version: 1,
   programName: "pattern 1",
-  lineCount: 3,
+  notes: "",
+  lineCount: 2,
   scalePresetId: "off",
   scaleRoot: "C",
   tempo: 126,
@@ -438,7 +440,8 @@ const BLANK_PROJECT_TEMPLATE: ProjectData = (() => {
   return {
     version: 1,
     programName: DEFAULT_UNSAVED_PATTERN_NAME,
-    lineCount: 3,
+    notes: "",
+    lineCount: 2,
     scalePresetId: "harmonic-minor",
     scaleRoot: "C",
     tempo: 94,
@@ -832,6 +835,8 @@ const formatBytes = (bytes: number): string => {
 
 const formatDeviceMemory = (gigabytes: number): string => `${Number.isInteger(gigabytes) ? gigabytes.toFixed(0) : gigabytes.toFixed(1)} GB`;
 
+const clampUnit = (value: number): number => Math.max(0, Math.min(1, value));
+
 const lineHasPatternContent = (line: LineState): boolean => {
   const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
   return line.steps.slice(0, voiceLength).some((step) => step.pitch !== null || step.timeMode !== "rest" || step.accent || step.slide || step.transpose !== "none");
@@ -844,11 +849,466 @@ const getExportVoiceIndices = (projectLines: LineState[], activeLineCount: 1 | 2
   return indices.length > 0 ? indices : [0];
 };
 
+const wrapSheetNotes = (ctx: CanvasRenderingContext2D, notes: string, maxWidth: number): string[] => {
+  const normalized = notes.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+  const wrapped: string[] = [];
+  const paragraphs = normalized.split("\n");
+
+  paragraphs.forEach((paragraph) => {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      wrapped.push("");
+      return;
+    }
+    let currentLine = "";
+    words.forEach((word) => {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (!currentLine || ctx.measureText(candidate).width <= maxWidth) {
+        currentLine = candidate;
+        return;
+      }
+      wrapped.push(currentLine);
+      currentLine = word;
+    });
+    if (currentLine) wrapped.push(currentLine);
+  });
+
+  return wrapped;
+};
+
+const getSheetNotesHeight = (ctx: CanvasRenderingContext2D, notes: string, maxWidth: number): number => {
+  ctx.save();
+  ctx.font = "22px Arial";
+  const lineCount = wrapSheetNotes(ctx, notes, maxWidth).length;
+  ctx.restore();
+  return lineCount === 0 ? 88 : Math.max(96, 72 + lineCount * 30);
+};
+
+const drawRoundedRectPath = (
+  ctx: CanvasRenderingContext2D,
+  { x, y, width, height, radius }: { x: number; y: number; width: number; height: number; radius: number },
+) => {
+  const cornerRadius = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + cornerRadius, y);
+  ctx.lineTo(x + width - cornerRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + cornerRadius);
+  ctx.lineTo(x + width, y + height - cornerRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - cornerRadius, y + height);
+  ctx.lineTo(x + cornerRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - cornerRadius);
+  ctx.lineTo(x, y + cornerRadius);
+  ctx.quadraticCurveTo(x, y, x + cornerRadius, y);
+  ctx.closePath();
+};
+
+const drawExportKnob = (
+  ctx: CanvasRenderingContext2D,
+  {
+    cx,
+    cy,
+    radius,
+    label,
+    normalized,
+  }: { cx: number; cy: number; radius: number; label: string; normalized: number },
+) => {
+  const startAngle = (Math.PI * 3) / 4;
+  const endAngle = (Math.PI * 9) / 4;
+  const pointerAngle = startAngle + clampUnit(normalized) * (endAngle - startAngle);
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.strokeStyle = "#181818";
+  ctx.lineWidth = 3;
+  ctx.fillStyle = "#fffdf8";
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  for (let tick = 0; tick <= 10; tick += 1) {
+    const angle = startAngle + (tick / 10) * (endAngle - startAngle);
+    const inner = radius + 6;
+    const outer = radius + (tick % 5 === 0 ? 18 : 13);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+    ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
+    ctx.stroke();
+  }
+
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(pointerAngle) * (radius - 10), cy + Math.sin(pointerAngle) * (radius - 10));
+  ctx.stroke();
+
+  ctx.fillStyle = "#111";
+  ctx.font = "700 18px Arial";
+  ctx.fillText(label, cx, cy - radius - 24);
+  ctx.restore();
+};
+
+const drawWaveformPreview = (
+  ctx: CanvasRenderingContext2D,
+  {
+    x,
+    y,
+    width,
+    height,
+    waveform,
+  }: { x: number; y: number; width: number; height: number; waveform: OscillatorType },
+) => {
+  const itemGap = 14;
+  const itemWidth = (width - itemGap) / 2;
+  const variants: Array<{ key: OscillatorType }> = [
+    { key: "sawtooth" },
+    { key: "square" },
+  ];
+
+  variants.forEach((variant, index) => {
+    const itemX = x + index * (itemWidth + itemGap);
+    const active = waveform === variant.key;
+    const iconWidth = itemWidth * 0.16;
+    const iconHeight = height * 0.2;
+    const iconLeft = itemX + (itemWidth - iconWidth) / 2;
+    const iconRight = iconLeft + iconWidth;
+    const iconTop = y + (height - iconHeight) / 2;
+    const iconBottom = iconTop + iconHeight;
+    ctx.save();
+    ctx.fillStyle = active ? "#111" : "#fffdf8";
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 2.5;
+    ctx.fillRect(itemX, y, itemWidth, height);
+    ctx.strokeRect(itemX, y, itemWidth, height);
+
+    ctx.strokeStyle = active ? "#fffdf8" : "#111";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    if (variant.key === "sawtooth") {
+      const baseY = iconBottom;
+      const topY = iconTop;
+      const leftX = iconLeft;
+      const middleX = (iconLeft + iconRight) / 2;
+      const rightX = iconRight;
+      ctx.moveTo(leftX, baseY);
+      ctx.lineTo(leftX, topY);
+      ctx.lineTo(middleX, baseY);
+      ctx.lineTo(middleX, topY);
+      ctx.lineTo(rightX, baseY);
+    } else {
+      const lowY = iconBottom;
+      const highY = iconTop;
+      const leftX = iconLeft;
+      const quarter = iconWidth / 4;
+      ctx.moveTo(leftX, lowY);
+      ctx.lineTo(leftX, highY);
+      ctx.lineTo(leftX + quarter * 2, highY);
+      ctx.lineTo(leftX + quarter * 2, lowY);
+      ctx.lineTo(leftX + quarter * 4, lowY);
+      ctx.lineTo(leftX + quarter * 4, highY);
+      ctx.lineTo(iconRight, highY);
+    }
+    ctx.stroke();
+    ctx.restore();
+  });
+};
+
+const drawTimeMarker = (
+  ctx: CanvasRenderingContext2D,
+  {
+    x,
+    y,
+    width,
+    height,
+    timeMode,
+  }: { x: number; y: number; width: number; height: number; timeMode: TimeMode },
+) => {
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+
+  ctx.save();
+  ctx.strokeStyle = "#111";
+  ctx.fillStyle = "#111";
+
+  if (timeMode === "note") {
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (timeMode === "tie") {
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(centerX - 10, centerY);
+  ctx.lineTo(centerX + 10, centerY);
+  ctx.stroke();
+  ctx.restore();
+};
+
+const drawSheetAppLogo = (
+  ctx: CanvasRenderingContext2D,
+  { x, y, size }: { x: number; y: number; size: number },
+) => {
+  const centerX = x + size / 2;
+  const centerY = y + size / 2;
+  const knobRadius = size * 0.42;
+  const knobGradient = ctx.createRadialGradient(centerX - knobRadius * 0.18, centerY - knobRadius * 0.18, knobRadius * 0.18, centerX, centerY, knobRadius);
+  knobGradient.addColorStop(0, "#f2f2f2");
+  knobGradient.addColorStop(1, "#cfcfcf");
+
+  ctx.save();
+  ctx.fillStyle = "#111";
+  drawRoundedRectPath(ctx, { x, y, width: size, height: size, radius: size * 0.12 });
+  ctx.fill();
+  ctx.fillStyle = knobGradient;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, knobRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#d0d0d0";
+  ctx.lineWidth = Math.max(2, size * 0.035);
+  ctx.stroke();
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = Math.max(3, size * 0.055);
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY);
+  ctx.lineTo(centerX + size * 0.19, centerY - size * 0.19);
+  ctx.stroke();
+  ctx.restore();
+};
+
+const drawVoiceSheet = (
+  ctx: CanvasRenderingContext2D,
+  {
+    width,
+    height,
+    voice,
+    voiceIndex,
+    tempo,
+    programName,
+    notes,
+  }: { width: number; height: number; voice: LineState; voiceIndex: number; tempo: number; programName: string; notes: string },
+) => {
+  const margin = 36;
+  const headerHeight = 132;
+  const gridTop = margin + headerHeight + 20;
+  const voiceLength = clampPatternLength(voice.patternLength, voice.timingMode);
+  const activeSteps = voice.steps.slice(0, voiceLength);
+  const rowLabels = ["NOTE", "TIME", "U/D", "ACC", "SLIDE"] as const;
+  const rowHeight = 50;
+  const headerRowHeight = 44;
+  const labelWidth = 120;
+  const gridWidth = width - margin * 2;
+  const stepCellWidth = (gridWidth - labelWidth) / voiceLength;
+  const footerTop = gridTop + headerRowHeight + rowLabels.length * rowHeight + 28;
+  const footerHeight = 126;
+  const summaryTop = footerTop + footerHeight + 24;
+  const summaryHeight = getSheetNotesHeight(ctx, notes, gridWidth - 32);
+  const waveformWidth = 220;
+  const knobAreaX = margin + waveformWidth + 24;
+  const knobAreaWidth = width - margin - knobAreaX;
+
+  ctx.fillStyle = "#f8f6ef";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#121212";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(12, 12, width - 24, height - 24);
+
+  const metaX = width - margin - 360;
+  const logoSize = 92;
+  const logoX = margin + 14;
+  const logoY = margin + 14;
+  const headerTextX = logoX + logoSize + 20;
+  const headerTitleY = margin + 56;
+  const headerVoiceY = margin + 96;
+
+  ctx.fillStyle = "#111";
+  ctx.font = "700 32px Arial";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(programName.trim() || "pattern", headerTextX, headerTitleY);
+  ctx.font = "700 18px Arial";
+  ctx.fillText(`Voice ${voiceIndex + 1}`, headerTextX, headerVoiceY);
+
+  ctx.strokeRect(margin, margin, width - margin * 2, headerHeight);
+  drawSheetAppLogo(ctx, { x: logoX, y: logoY, size: logoSize });
+  ctx.beginPath();
+  ctx.moveTo(metaX, margin);
+  ctx.lineTo(metaX, margin + headerHeight);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(metaX, margin + 44);
+  ctx.lineTo(width - margin, margin + 44);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(metaX, margin + 88);
+  ctx.lineTo(width - margin, margin + 88);
+  ctx.stroke();
+
+  ctx.font = "700 18px Arial";
+  ctx.fillText(`Tempo`, metaX + 16, margin + 28);
+  ctx.fillText(`Timing`, metaX + 16, margin + 72);
+  ctx.fillText(`Length`, metaX + 16, margin + 116);
+  ctx.font = "700 28px Arial";
+  ctx.fillText(`${tempo} BPM`, metaX + 120, margin + 31);
+  ctx.fillText(voice.timingMode === "triplet" ? "Triplet" : "Normal", metaX + 120, margin + 75);
+  ctx.fillText(String(voiceLength), metaX + 120, margin + 119);
+
+  ctx.strokeRect(margin, gridTop, gridWidth, headerRowHeight + rowLabels.length * rowHeight);
+  ctx.beginPath();
+  ctx.moveTo(margin + labelWidth, gridTop);
+  ctx.lineTo(margin + labelWidth, gridTop + headerRowHeight + rowLabels.length * rowHeight);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(margin, gridTop + headerRowHeight);
+  ctx.lineTo(width - margin, gridTop + headerRowHeight);
+  ctx.stroke();
+
+  for (let stepIndex = 0; stepIndex < voiceLength; stepIndex += 1) {
+    const x = margin + labelWidth + stepCellWidth * stepIndex;
+    if (stepIndex % 4 === 0) {
+      ctx.save();
+      ctx.fillStyle = stepIndex % 8 === 0 ? "#efebe2" : "#f5f2eb";
+      ctx.fillRect(x, gridTop + 1, stepCellWidth, headerRowHeight + rowLabels.length * rowHeight - 2);
+      ctx.restore();
+    }
+  }
+
+  for (let stepIndex = 0; stepIndex <= voiceLength; stepIndex += 1) {
+    const x = margin + labelWidth + stepCellWidth * stepIndex;
+    const isBarLine = stepIndex < voiceLength && stepIndex % 4 === 0;
+    ctx.save();
+    ctx.lineWidth = isBarLine ? 3 : 1.5;
+    ctx.strokeStyle = "#121212";
+    ctx.beginPath();
+    ctx.moveTo(x, gridTop);
+    ctx.lineTo(x, gridTop + headerRowHeight + rowLabels.length * rowHeight);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#121212";
+  ctx.beginPath();
+  ctx.moveTo(margin, gridTop + headerRowHeight);
+  ctx.lineTo(width - margin, gridTop + headerRowHeight);
+  ctx.stroke();
+  ctx.restore();
+
+  for (let stepIndex = 0; stepIndex < voiceLength; stepIndex += 4) {
+    const x = margin + labelWidth + stepCellWidth * stepIndex;
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#121212";
+    ctx.beginPath();
+    ctx.moveTo(x, gridTop);
+    ctx.lineTo(x, gridTop + headerRowHeight);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  for (let stepIndex = 0; stepIndex < voiceLength; stepIndex += 1) {
+    const x = margin + labelWidth + stepCellWidth * stepIndex;
+    ctx.fillStyle = "#111";
+    ctx.font = "700 18px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(stepIndex + 1), x + stepCellWidth / 2, gridTop + headerRowHeight / 2);
+  }
+
+  rowLabels.forEach((rowLabel, rowIndex) => {
+    const y = gridTop + headerRowHeight + rowHeight * rowIndex;
+    if (rowIndex > 0) {
+      ctx.beginPath();
+      ctx.moveTo(margin, y);
+      ctx.lineTo(width - margin, y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#111";
+    ctx.textAlign = "left";
+    ctx.font = "700 18px Arial";
+    ctx.fillText(rowLabel, margin + 14, y + rowHeight / 2 + 1);
+
+    for (let stepIndex = 0; stepIndex < voiceLength; stepIndex += 1) {
+      const step = activeSteps[stepIndex];
+      const x = margin + labelWidth + stepCellWidth * stepIndex;
+      let value = "";
+      if (rowLabel === "NOTE") value = step.timeMode === "note" && step.pitch ? shortNote(step.pitch) : step.timeMode === "tie" ? "~" : "";
+      if (rowLabel === "U/D") value = step.transpose === "up" ? "U" : step.transpose === "down" ? "D" : "";
+      if (rowLabel === "ACC") value = step.accent ? "x" : "";
+      if (rowLabel === "SLIDE") value = step.slide ? "x" : "";
+      if (rowLabel === "TIME") {
+        drawTimeMarker(ctx, { x, y, width: stepCellWidth, height: rowHeight, timeMode: step.timeMode });
+        continue;
+      }
+      if (!value) continue;
+      ctx.textAlign = "center";
+      ctx.font = rowLabel === "NOTE" ? "700 18px Arial" : "700 20px Arial";
+      ctx.fillText(value, x + stepCellWidth / 2, y + rowHeight / 2 + 1);
+    }
+  });
+
+  ctx.strokeRect(margin, summaryTop, gridWidth, summaryHeight);
+  ctx.font = "700 24px Arial";
+  ctx.textAlign = "left";
+  ctx.fillText("Notes", margin + 16, summaryTop + 34);
+  ctx.font = "22px Arial";
+  wrapSheetNotes(ctx, notes, gridWidth - 32).forEach((line, index) => {
+    ctx.fillText(line, margin + 16, summaryTop + 74 + index * 30);
+  });
+
+  ctx.strokeRect(margin, footerTop, waveformWidth, footerHeight);
+  ctx.font = "700 16px Arial";
+  ctx.fillText("Waveform", margin + 16, footerTop + 28);
+  drawWaveformPreview(ctx, {
+    x: margin + 16,
+    y: footerTop + 38,
+    width: waveformWidth - 32,
+    height: footerHeight - 54,
+    waveform: voice.params.waveform,
+  });
+
+  ctx.strokeRect(knobAreaX, footerTop, knobAreaWidth, footerHeight);
+  const knobSpecs = [
+    { label: "Cutoff", valueText: String(Math.round(voice.params.cutoff)), normalized: (voice.params.cutoff - 180) / (2400 - 180) },
+    { label: "Resonance", valueText: voice.params.resonance.toFixed(1), normalized: voice.params.resonance / 22 },
+    { label: "Env Mod", valueText: String(Math.round(voice.params.envMod)), normalized: voice.params.envMod / 2600 },
+    { label: "Decay", valueText: voice.params.decay.toFixed(2), normalized: (voice.params.decay - 0.08) / (0.6 - 0.08) },
+    { label: "Accent", valueText: voice.params.accent.toFixed(2), normalized: (voice.params.accent - 1) / (2.5 - 1) },
+  ];
+  const knobCenterY = footerTop + footerHeight / 2 + 2;
+  const knobRadius = Math.min(24, Math.max(18, knobAreaWidth / 22));
+  const knobSpacing = knobAreaWidth / knobSpecs.length;
+
+  knobSpecs.forEach((knob, index) => {
+    drawExportKnob(ctx, {
+      cx: knobAreaX + knobSpacing * index + knobSpacing / 2,
+      cy: knobCenterY,
+      radius: knobRadius,
+      label: knob.label,
+      normalized: knob.normalized,
+    });
+  });
+};
+
 function App() {
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [halfTempoBase, setHalfTempoBase] = useState<number | null>(null);
   const [programName, setProgramName] = useState(DEFAULT_PROJECT_STATE.programName);
+  const [sheetNotes, setSheetNotes] = useState(DEFAULT_PROJECT_STATE.notes ?? "");
   const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId ?? "off");
   const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot ?? "C");
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
@@ -900,8 +1360,8 @@ function App() {
     memoryDetail: "Browser memory details are not exposed here.",
   });
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
+  const sheetNotesRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceStepRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const voiceTickRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
   const nextStepTimeRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
@@ -948,6 +1408,7 @@ function App() {
   const buildProjectSnapshot = (): ProjectData => ({
     version: 1,
     programName,
+    notes: sheetNotes,
     lineCount,
     scalePresetId,
     scaleRoot,
@@ -1485,129 +1946,35 @@ function App() {
     stopAudioVoices(audioRef, lineFxRef);
   }, [isPlaying]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const baseProgramName = programName.trim() || "Program";
-    const patternName = `${baseProgramName} - ${selectedLine + 1}`;
-    ctx.fillStyle = "#f0f0f0";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#111";
-    ctx.font = "bold 24px Arial";
-    ctx.fillText("TB-303 Pattern Chart", 16, 30);
-    ctx.font = "13px Arial";
-    ctx.fillText(`Pattern Name: ${patternName}`, 16, 52);
-    ctx.fillText(`BPM: ${tempo}  Wave: ${lines[selectedLine].params.waveform.toUpperCase()}`, 16, 70);
-
-    const cols = lines[selectedLine].patternLength;
-    const left = 16;
-    const top = 84;
-    const rowHeight = 24;
-    const labelWidth = 100;
-    const colWidth = Math.floor((canvas.width - left - labelWidth - 16) / cols);
-    const labels = ["STEP", "TIME", "NOTE", "DOWN", "UP", "ACC", "SLIDE"];
-    const active = lines[selectedLine].steps.slice(0, lines[selectedLine].patternLength);
-
-    labels.forEach((label, r) => {
-      const y = top + r * rowHeight;
-      ctx.strokeStyle = "#202020";
-      ctx.strokeRect(left, y, labelWidth, rowHeight);
-      ctx.fillStyle = "#111";
-      ctx.fillText(label, left + 8, y + 16);
-      for (let c = 0; c < cols; c += 1) {
-        const x = left + labelWidth + c * colWidth;
-        ctx.strokeRect(x, y, colWidth, rowHeight);
-        const step = active[c];
-        let value = "";
-        if (label === "STEP") value = String(c + 1);
-        if (label === "NOTE") {
-          if (step.timeMode === "rest") value = "";
-          else if (step.timeMode === "tie") value = "~";
-          else value = shortNote(step.pitch);
-        }
-        if (label === "DOWN") value = step.transpose === "down" ? "x" : "";
-        if (label === "UP") value = step.transpose === "up" ? "x" : "";
-        if (label === "ACC") value = step.accent ? "x" : "";
-        if (label === "SLIDE") value = step.slide ? "x" : "";
-        if (label === "TIME") value = step.timeMode === "note" ? "𝅘𝅥𝅯" : step.timeMode === "tie" ? "⁀𝅘𝅥𝅯" : "";
-        if (value) ctx.fillText(value, x + 8, y + 16);
-      }
-    });
-  }, [lines, selectedLine, tempo, programName]);
-
   const buildExportDataUrl = () => {
     const exportVoiceIndices = getExportVoiceIndices(lines, lineCount);
-    const exportVoices = exportVoiceIndices.length;
-    const voiceRows = ["STEP", "TIME", "NOTE", "DOWN", "UP", "ACC", "SLIDE"] as const;
-    const voiceBlockHeight = 286;
+    const sheetGap = 28;
+    const sheetWidth = 1400;
+    const metricsCanvas = document.createElement("canvas");
+    const metricsCtx = metricsCanvas.getContext("2d");
+    if (!metricsCtx) return null;
+    const sheetHeight = 718 + getSheetNotesHeight(metricsCtx, sheetNotes, sheetWidth - 72 - 32);
     const canvas = document.createElement("canvas");
-    canvas.width = 980;
-    canvas.height = 120 + voiceBlockHeight * exportVoices;
+    canvas.width = sheetWidth;
+    canvas.height = exportVoiceIndices.length * sheetHeight + Math.max(0, exportVoiceIndices.length - 1) * sheetGap;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
-    const baseProgramName = programName.trim() || "Program";
-
-    ctx.fillStyle = "#f8f8f8";
+    ctx.fillStyle = "#ece7dc";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "#111";
-    ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
-
-    ctx.fillStyle = "#111";
-    ctx.font = "bold 34px Arial";
-    ctx.fillText("TB-303 Pattern Charts", 24, 46);
-    ctx.font = "13px Arial";
-    ctx.fillText(`Program: ${baseProgramName}`, 24, 72);
-    ctx.fillText(`BPM: ${tempo}   Voices exported: ${exportVoices}`, 24, 92);
-
-    const left = 24;
-    const rowHeight = 30;
-    const labelWidth = 110;
-
-    for (let exportIndex = 0; exportIndex < exportVoices; exportIndex += 1) {
-      const voiceIndex = exportVoiceIndices[exportIndex];
-      const voice = lines[voiceIndex];
-      const voiceTop = 120 + exportIndex * voiceBlockHeight;
-      const voiceLength = clampPatternLength(voice.patternLength, voice.timingMode);
-      const active = voice.steps.slice(0, voiceLength);
-      const colWidth = Math.floor((canvas.width - left - labelWidth - 24) / voiceLength);
-
-      ctx.font = "bold 16px Arial";
-      ctx.fillText(`VOICE ${voiceIndex + 1} (${voice.timingMode === "triplet" ? "Triplet" : "Normal"})`, left, voiceTop - 8);
-      ctx.font = "13px Arial";
-
-      voiceRows.forEach((row, r) => {
-        const y = voiceTop + r * rowHeight;
-        ctx.strokeRect(left, y, labelWidth, rowHeight);
-        ctx.fillText(row, left + 8, y + 20);
-        for (let i = 0; i < voiceLength; i += 1) {
-          const x = left + labelWidth + i * colWidth;
-          ctx.strokeRect(x, y, colWidth, rowHeight);
-          if (isStepDisabledForTimingMode(i, voiceLength, voice.timingMode)) {
-            ctx.save();
-            ctx.fillStyle = "#d8dce1";
-            ctx.fillRect(x + 1, y + 1, colWidth - 2, rowHeight - 2);
-            ctx.restore();
-            continue;
-          }
-          const step = active[i];
-          let value = "";
-          if (row === "STEP") value = String(i + 1);
-          if (row === "NOTE") {
-            if (step.timeMode === "rest") value = "";
-            else if (step.timeMode === "tie") value = "~";
-            else value = shortNote(step.pitch);
-          }
-          if (row === "DOWN") value = step.transpose === "down" ? "x" : "";
-          if (row === "UP") value = step.transpose === "up" ? "x" : "";
-          if (row === "ACC") value = step.accent ? "x" : "";
-          if (row === "SLIDE") value = step.slide ? "x" : "";
-          if (row === "TIME") value = step.timeMode === "note" ? "𝅘𝅥𝅯" : step.timeMode === "tie" ? "⁀𝅘𝅥𝅯" : "";
-          if (value) ctx.fillText(value, x + 8, y + 20);
-        }
+    exportVoiceIndices.forEach((voiceIndex, exportIndex) => {
+      ctx.save();
+      ctx.translate(0, exportIndex * (sheetHeight + sheetGap));
+      drawVoiceSheet(ctx, {
+        width: sheetWidth,
+        height: sheetHeight,
+        voice: lines[voiceIndex],
+        voiceIndex,
+        tempo,
+        programName,
+        notes: sheetNotes,
       });
-    }
+      ctx.restore();
+    });
     return canvas.toDataURL("image/png");
   };
 
@@ -1763,6 +2130,7 @@ function App() {
     return {
       version: 1,
       programName: data.programName,
+      notes: typeof data.notes === "string" ? data.notes : "",
       lineCount: data.lineCount,
       scalePresetId,
       scaleRoot,
@@ -1779,6 +2147,7 @@ function App() {
     try {
       const parsed = validateProjectData(JSON.parse(text));
       setProgramName(parsed.programName);
+      setSheetNotes(parsed.notes ?? "");
       setLineCount(parsed.lineCount);
       setScalePresetId(parsed.scalePresetId ?? "off");
       setScaleRoot(parsed.scaleRoot ?? "C");
@@ -2356,6 +2725,7 @@ function App() {
       resetPlaybackState();
       setWorkspaceView("editor");
       setProgramName(parsed.programName);
+      setSheetNotes(parsed.notes ?? "");
       setLineCount(parsed.lineCount);
       setScalePresetId(parsed.scalePresetId ?? "off");
       setScaleRoot(parsed.scaleRoot ?? "C");
@@ -2525,6 +2895,7 @@ function App() {
     setScaleRoot(blankProject.scaleRoot ?? "C");
     setProjectTempo(blankProject.tempo);
     setSelectedLine(blankProject.selectedLine);
+    setSheetNotes(blankProject.notes ?? "");
     setLines(blankProject.lines);
   };
 
@@ -2539,7 +2910,14 @@ function App() {
       if (url) setExportPreviewUrl(url);
     }, 120);
     return () => window.clearTimeout(timeoutId);
-  }, [workspaceView, lines, lineCount, tempo, programName]);
+  }, [workspaceView, lines, lineCount, tempo, programName, sheetNotes]);
+
+  useEffect(() => {
+    const textarea = sheetNotesRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.max(52, textarea.scrollHeight)}px`;
+  }, [sheetNotes, workspaceView]);
 
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 980px)");
@@ -4004,7 +4382,16 @@ function App() {
             ) : (
               <p className="preview-help">Preparing preview...</p>
             )}
-            <canvas className="export-canvas" ref={canvasRef} width={1040} height={300} />
+            <div className="sheet-notes-editor">
+              <label htmlFor="sheet-notes">Sheet notes</label>
+              <textarea
+                id="sheet-notes"
+                ref={sheetNotesRef}
+                value={sheetNotes}
+                onChange={(event) => setSheetNotes(event.currentTarget.value)}
+                placeholder="Add notes for the exported sheet"
+              />
+            </div>
           </section>
         </div>
       </div>
