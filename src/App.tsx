@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
+import { checkPermissions as checkAndroidInstallPermissions, install as installAndroidPackage, requestPermissions as requestAndroidInstallPermissions } from "@kingsword/tauri-plugin-android-package-install";
 import packageJson from "../package.json";
 import { ensureAudioGraph, playScheduledStep, prepareAudioGraph, stopAudioVoices, syncLineAudioState, type AudioLineFx } from "./audioEngine";
 import "./App.css";
@@ -86,8 +87,28 @@ type LineState = {
 
 type UpdateDialogState =
   | { kind: "up-to-date"; currentVersion: string }
-  | { kind: "available"; currentVersion: string; latestVersion: string; releaseUrl: string }
+  | { kind: "available"; currentVersion: string; latestVersion: string; releaseUrl: string; apkAsset: ReleaseApkAsset | null }
   | { kind: "error"; currentVersion: string; message: string; releaseUrl: string };
+
+type ReleaseApkAsset = {
+  name: string;
+  downloadUrl: string;
+};
+
+type GithubReleaseAsset = {
+  name?: string;
+  browser_download_url?: string;
+};
+
+type GithubLatestReleaseResponse = {
+  tag_name?: string;
+  html_url?: string;
+  assets?: GithubReleaseAsset[];
+};
+
+type DownloadedReleaseApk = {
+  filePath: string;
+};
 
 type ProjectData = {
   version: 1;
@@ -748,6 +769,29 @@ const compareVersionTags = (left: string, right: string): number => {
   return 0;
 };
 
+const resolveReleaseApkAsset = (assets: GithubReleaseAsset[] | undefined): ReleaseApkAsset | null => {
+  if (!assets?.length) return null;
+  const apkAsset = [...assets]
+    .filter((asset): asset is Required<Pick<GithubReleaseAsset, "name" | "browser_download_url">> => {
+      const name = asset.name?.trim();
+      const downloadUrl = asset.browser_download_url?.trim();
+      return Boolean(name && downloadUrl && name.toLowerCase().endsWith(".apk"));
+    })
+    .sort((left, right) => {
+      const leftName = left.name.toLowerCase();
+      const rightName = right.name.toLowerCase();
+      const leftScore = Number(leftName.includes("universal")) + Number(!leftName.includes("debug")) + Number(!leftName.includes("unaligned"));
+      const rightScore = Number(rightName.includes("universal")) + Number(!rightName.includes("debug")) + Number(!rightName.includes("unaligned"));
+      return rightScore - leftScore;
+    })[0];
+  return apkAsset
+    ? {
+        name: apkAsset.name.trim(),
+        downloadUrl: apkAsset.browser_download_url.trim(),
+      }
+    : null;
+};
+
 const normalizeFxVisibilitySettings = (settings: FxVisibilitySettings): FxVisibilitySettings => {
   let enabledCount = 0;
   return FX_VISIBILITY_ORDER.reduce((acc, key) => {
@@ -1357,6 +1401,8 @@ function App() {
   const [isNewLibraryModalOpen, setIsNewLibraryModalOpen] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState("");
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState | null>(null);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [updateInstallMessage, setUpdateInstallMessage] = useState("");
   const [isInitDialogOpen, setIsInitDialogOpen] = useState(false);
   const [fxVisibility, setFxVisibility] = useState<FxVisibilitySettings>(() => loadFxVisibilitySettings());
   const [selectedFxMenu, setSelectedFxMenu] = useState<FxMenuSection>("delay");
@@ -2421,7 +2467,15 @@ function App() {
 
   const showUpdateDialog = (dialog: UpdateDialogState) => {
     setMobileProjectOpen(false);
+    setIsInstallingUpdate(false);
+    setUpdateInstallMessage("");
     setUpdateDialog(dialog);
+  };
+
+  const closeUpdateDialog = () => {
+    if (isInstallingUpdate) return;
+    setUpdateInstallMessage("");
+    setUpdateDialog(null);
   };
 
   const showInitDialog = () => {
@@ -2429,21 +2483,63 @@ function App() {
     setIsInitDialogOpen(true);
   };
 
-  const openLatestReleasePage = async (url = LATEST_RELEASE_URL) => {
+  const openExternalUrl = async (url: string, errorFallbackUrl = LATEST_RELEASE_URL): Promise<boolean> => {
     try {
       if (isTauri()) {
         await invoke("open_external_url", { url });
-        return;
+        return true;
       }
       window.open(url, "_blank", "noopener,noreferrer");
+      return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not open the release page.";
+      const message = error instanceof Error ? error.message : "Could not open the download link.";
       showUpdateDialog({
         kind: "error",
         currentVersion: APP_VERSION,
         message,
-        releaseUrl: url,
+        releaseUrl: errorFallbackUrl,
       });
+      return false;
+    }
+  };
+
+  const downloadReleaseApk = async (apkAsset: ReleaseApkAsset, releaseUrl: string) => {
+    const opened = await openExternalUrl(apkAsset.downloadUrl, releaseUrl);
+    if (opened) {
+      setUpdateDialog(null);
+    }
+  };
+
+  const downloadAndInstallAndroidUpdate = async (apkAsset: ReleaseApkAsset, versionTag: string, releaseUrl: string) => {
+    setIsInstallingUpdate(true);
+    setUpdateInstallMessage("Downloading the latest APK...");
+    try {
+      let permissionState = await checkAndroidInstallPermissions();
+      if (permissionState !== "granted") {
+        permissionState = await requestAndroidInstallPermissions();
+      }
+      if (permissionState !== "granted") {
+        throw new Error("Android did not grant permission to open the installer.");
+      }
+      const { filePath } = await invoke<DownloadedReleaseApk>("download_release_apk", {
+        downloadUrl: apkAsset.downloadUrl,
+        fileName: apkAsset.name,
+        versionTag,
+      });
+      setUpdateInstallMessage("Opening the Android installer...");
+      await installAndroidPackage(filePath);
+      setUpdateInstallMessage("");
+      setUpdateDialog(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not download the update.";
+      showUpdateDialog({
+        kind: "error",
+        currentVersion: APP_VERSION,
+        message,
+        releaseUrl,
+      });
+    } finally {
+      setIsInstallingUpdate(false);
     }
   };
 
@@ -2457,9 +2553,10 @@ function App() {
       if (!response.ok) {
         throw new Error(`GitHub releases request failed (${response.status}).`);
       }
-      const latestRelease = (await response.json()) as { tag_name?: string; html_url?: string };
+      const latestRelease = (await response.json()) as GithubLatestReleaseResponse;
       const latestTag = latestRelease.tag_name?.trim();
       const releaseUrl = latestRelease.html_url?.trim() || LATEST_RELEASE_URL;
+      const apkAsset = resolveReleaseApkAsset(latestRelease.assets);
       if (!latestTag) {
         showUpdateDialog({
           kind: "error",
@@ -2480,6 +2577,7 @@ function App() {
         currentVersion: APP_VERSION,
         latestVersion: latestTag,
         releaseUrl,
+        apkAsset,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not check for updates.";
@@ -3593,7 +3691,7 @@ function App() {
         </div>
       ) : null}
       {updateDialog ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setUpdateDialog(null)}>
+        <div className="modal-backdrop" role="presentation" onClick={closeUpdateDialog}>
           <div
             className="modal-card mobile-project-modal update-modal"
             role="dialog"
@@ -3603,7 +3701,7 @@ function App() {
           >
             <div className="modal-header">
               <h2 id="update-dialog-title">Update</h2>
-              <button type="button" onClick={() => setUpdateDialog(null)}>
+              <button type="button" onClick={closeUpdateDialog} disabled={isInstallingUpdate}>
                 Close
               </button>
             </div>
@@ -3617,7 +3715,17 @@ function App() {
                     <span>Latest</span>
                     <strong>{updateDialog.latestVersion}</strong>
                   </div>
-                  <p className="update-dialog-note">Download will open in your device&apos;s default browser.</p>
+                  <p className="update-dialog-note">
+                    {isAndroidTauriApp && updateDialog.apkAsset
+                      ? isInstallingUpdate
+                        ? updateInstallMessage
+                        : "Download and install stays in the app until Android opens the installer."
+                      : isAndroidTauriApp
+                        ? "This release does not include an APK asset, so the releases page will open instead."
+                        : updateDialog.apkAsset
+                          ? "Tap Download to fetch the latest APK directly."
+                          : "This release does not include an APK asset, so the releases page will open instead."}
+                  </p>
                 </>
               ) : updateDialog.kind === "up-to-date" ? (
                 <p className="update-dialog-message">You already have the latest version ({updateDialog.currentVersion}).</p>
@@ -3631,24 +3739,33 @@ function App() {
             <div className="modal-actions">
               {updateDialog.kind === "available" ? (
                 <>
-                  <button type="button" onClick={() => setUpdateDialog(null)}>
+                  <button type="button" onClick={closeUpdateDialog} disabled={isInstallingUpdate}>
                     Later
                   </button>
                   <button
                     type="button"
                     className="selected"
+                    disabled={isInstallingUpdate}
                     onClick={() => {
+                      if (isAndroidTauriApp && updateDialog.apkAsset) {
+                        void downloadAndInstallAndroidUpdate(updateDialog.apkAsset, updateDialog.latestVersion, updateDialog.releaseUrl);
+                        return;
+                      }
+                      if (updateDialog.apkAsset) {
+                        void downloadReleaseApk(updateDialog.apkAsset, updateDialog.releaseUrl);
+                        return;
+                      }
                       const releaseUrl = updateDialog.releaseUrl;
                       setUpdateDialog(null);
-                      void openLatestReleasePage(releaseUrl);
+                      void openExternalUrl(releaseUrl);
                     }}
                   >
-                    Download
+                    {isInstallingUpdate ? "Downloading..." : isAndroidTauriApp && updateDialog.apkAsset ? "Download & install" : "Download"}
                   </button>
                 </>
               ) : updateDialog.kind === "error" ? (
                 <>
-                  <button type="button" onClick={() => setUpdateDialog(null)}>
+                  <button type="button" onClick={closeUpdateDialog}>
                     Close
                   </button>
                   <button
@@ -3656,15 +3773,15 @@ function App() {
                     className="selected"
                     onClick={() => {
                       const releaseUrl = updateDialog.releaseUrl;
-                      setUpdateDialog(null);
-                      void openLatestReleasePage(releaseUrl);
+                      closeUpdateDialog();
+                      void openExternalUrl(releaseUrl);
                     }}
                   >
                     Open releases
                   </button>
                 </>
               ) : (
-                <button type="button" className="selected" onClick={() => setUpdateDialog(null)}>
+                <button type="button" className="selected" onClick={closeUpdateDialog}>
                   OK
                 </button>
               )}

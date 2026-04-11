@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/android-schema.json",
+  "identifier": "android-updates",
+  "description": "Capability for Android in-app APK installs",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": ["android-package-install:default"]
+}
