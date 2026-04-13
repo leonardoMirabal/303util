@@ -1455,6 +1455,7 @@ function App() {
   const midiClockTimeoutRef = useRef<number | null>(null);
   const effectiveTempoRef = useRef(tempo);
   const halfTempoBaseRef = useRef<number | null>(halfTempoBase);
+  const midiTransportArmedRef = useRef<null | { resetPosition: boolean }>(null);
 
   const setPlayheadValue = (value: number) => {
     if (playheadRef.current === value) return;
@@ -1505,6 +1506,7 @@ function App() {
     midiClockPulseCounterRef.current.fill(0);
     midiLastClockTimestampRef.current = null;
     midiRecentClockDeltasRef.current = [];
+    midiTransportArmedRef.current = null;
     midiSmoothedTempoRef.current = null;
     setMidiClockTempo(null);
     if (clearSourceLock) {
@@ -1518,6 +1520,7 @@ function App() {
     clearScheduledPlayheadUpdates();
     setPlayheadValue(-1);
     midiClockPulseCounterRef.current.fill(0);
+    midiTransportArmedRef.current = null;
     stopAudioVoices(audioRef, lineFxRef);
     isPlayingRef.current = false;
     setIsPlaying(false);
@@ -1625,6 +1628,10 @@ function App() {
 
     if (!midiClockSettingsRef.current.enabled) {
       await setMidiClockEnabled(true);
+    }
+
+    if (midiRuntime.kind === "web") {
+      await refreshMidiInputs();
     }
 
     clearMidiClockTracking(true);
@@ -2014,22 +2021,17 @@ function App() {
     }
 
     const currentTime = graph.ctx.currentTime;
-    const stepTime = Math.max(currentTime + 0.001, currentTime + 0.01 + midiClockScheduleOffsetSeconds());
-    syncAllLineAudioState(Math.max(currentTime, stepTime - 0.03));
+    syncAllLineAudioState(currentTime);
 
     if (resetPosition) {
-      stopAudioVoices(audioRef, lineFxRef, stepTime);
-      resetPlaybackState(stepTime);
-      midiClockPulseCounterRef.current.fill(0);
-      for (let li = 0; li < lineCountRef.current; li += 1) {
-        scheduleMidiStepAtTime(li, stepTime, currentTime);
-      }
-    } else {
-      midiClockPulseCounterRef.current.fill(0);
+      stopAudioVoices(audioRef, lineFxRef, currentTime + 0.001);
+      resetPlaybackState(currentTime);
     }
 
-    isPlayingRef.current = true;
-    setIsPlaying(true);
+    midiClockPulseCounterRef.current.fill(0);
+    midiTransportArmedRef.current = { resetPosition };
+    isPlayingRef.current = false;
+    setIsPlaying(false);
   };
 
   const handleMidiRealtimeEvent = async (event: MidiRealtimeEvent) => {
@@ -2060,11 +2062,20 @@ function App() {
       armMidiClockTimeout();
       setMidiStatus("synced");
       setMidiStatusMessage(`Receiving MIDI clock from ${sourceLabel}.`);
-      if (!isPlayingRef.current) return;
 
       const ctx = audioRef.current;
       const currentTime = ctx?.currentTime ?? 0;
       const stepTime = Math.max(currentTime + 0.001, currentTime + 0.01 + midiClockScheduleOffsetSeconds());
+      if (midiTransportArmedRef.current) {
+        midiTransportArmedRef.current = null;
+        for (let li = 0; li < lineCountRef.current; li += 1) {
+          scheduleMidiStepAtTime(li, stepTime, currentTime);
+        }
+        isPlayingRef.current = true;
+        setIsPlaying(true);
+        return;
+      }
+      if (!isPlayingRef.current) return;
       for (let li = 0; li < lineCountRef.current; li += 1) {
         midiClockPulseCounterRef.current[li] += 1;
         const line = linesRef.current[li];
@@ -2083,13 +2094,13 @@ function App() {
       if (midiClockSettingsRef.current.mode === "auto") {
         midiSourceLockRef.current = { id: event.sourceId, name: event.sourceName };
       }
-      updateMidiStatusForWaitingSource(`MIDI start received from ${sourceLabel}. Waiting for clock pulses...`);
+      updateMidiStatusForWaitingSource(`MIDI start received from ${sourceLabel}. Waiting for the first clock boundary...`);
       await startMidiTransportFromExternal(true);
       return;
     }
 
     if (event.kind === "continue") {
-      updateMidiStatusForWaitingSource(`MIDI continue received from ${sourceLabel}. Waiting for clock pulses...`);
+      updateMidiStatusForWaitingSource(`MIDI continue received from ${sourceLabel}. Waiting for the next clock boundary...`);
       await startMidiTransportFromExternal(false);
       return;
     }
@@ -2289,11 +2300,9 @@ function App() {
     setMidiStatusMessage(
       midiClockSettings.mode === "device"
         ? "Waiting for MIDI clock from the selected device."
-        : midiClockSettings.deviceId
-          ? "Waiting for MIDI clock from the preferred auto device."
-          : "Waiting for MIDI clock. Auto mode will lock to the first active source.",
+        : "Waiting for MIDI clock. Auto mode will lock to the first active source.",
     );
-  }, [midiClockSettings.mode, midiClockSettings.deviceId]);
+  }, [midiClockSettings.enabled, midiClockSettings.mode]);
 
   useEffect(() => {
     if (!midiClockSettings.enabled) return;
