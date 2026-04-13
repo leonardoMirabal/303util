@@ -1,21 +1,29 @@
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use midir::{Ignore, MidiInput};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use reqwest::blocking::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REDIRECT_PATH: &str = "/callback";
+const MIDI_REALTIME_EVENT: &str = "midi-realtime";
+const MIDI_INPUTS_CHANGED_EVENT: &str = "midi-inputs-changed";
+const MIDI_ERROR_EVENT: &str = "midi-error";
 
 #[derive(Debug, Deserialize)]
 struct GoogleTokenSuccess {
@@ -26,6 +34,167 @@ struct GoogleTokenSuccess {
 struct GoogleTokenError {
     error: String,
     error_description: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MidiInputPortInfo {
+    id: String,
+    name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MidiRealtimeEventPayload {
+    kind: &'static str,
+    source_id: String,
+    source_name: String,
+    timestamp_millis: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MidiErrorPayload {
+    message: String,
+}
+
+struct MidiWorkerHandle {
+    shutdown: Arc<AtomicBool>,
+    join: JoinHandle<()>,
+}
+
+struct MidiWorkerState(Mutex<Option<MidiWorkerHandle>>);
+
+impl Default for MidiWorkerState {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+fn emit_midi_error(app: &AppHandle, message: impl Into<String>) {
+    let _ = app.emit(
+        MIDI_ERROR_EVENT,
+        MidiErrorPayload {
+            message: message.into(),
+        },
+    );
+}
+
+fn list_midi_inputs() -> Result<Vec<MidiInputPortInfo>, String> {
+    let midi_input = MidiInput::new("303util-midi-inputs")
+        .map_err(|error| format!("Failed to create MIDI input interface: {error}"))?;
+    let mut ports = BTreeMap::new();
+    for (index, port) in midi_input.ports().into_iter().enumerate() {
+        let name = midi_input
+            .port_name(&port)
+            .unwrap_or_else(|_| format!("MIDI Input {}", index + 1));
+        ports.insert(
+            format!("{index}:{name}"),
+            MidiInputPortInfo {
+                id: format!("{index}:{name}"),
+                name,
+            },
+        );
+    }
+    Ok(ports.into_values().collect())
+}
+
+fn midi_event_from_message(
+    source_id: &str,
+    source_name: &str,
+    timestamp_micros: u64,
+    message: &[u8],
+) -> Option<MidiRealtimeEventPayload> {
+    let kind = match message.first().copied() {
+        Some(0xf8) => "clock",
+        Some(0xfa) => "start",
+        Some(0xfb) => "continue",
+        Some(0xfc) => "stop",
+        _ => return None,
+    };
+    Some(MidiRealtimeEventPayload {
+        kind,
+        source_id: source_id.to_string(),
+        source_name: source_name.to_string(),
+        timestamp_millis: timestamp_micros as f64 / 1000.0,
+    })
+}
+
+fn spawn_midi_worker(app: AppHandle, shutdown: Arc<AtomicBool>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut known_inputs: Vec<MidiInputPortInfo> = Vec::new();
+        let mut active_connections = Vec::new();
+        let mut connected_input_ids: Vec<String> = Vec::new();
+
+        while !shutdown.load(Ordering::Relaxed) {
+            let current_inputs = match list_midi_inputs() {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    emit_midi_error(&app, error);
+                    thread::sleep(Duration::from_millis(1200));
+                    continue;
+                }
+            };
+
+            if current_inputs != known_inputs {
+                known_inputs = current_inputs.clone();
+                let _ = app.emit(MIDI_INPUTS_CHANGED_EVENT, known_inputs.clone());
+            }
+
+            let current_input_ids = known_inputs.iter().map(|input| input.id.clone()).collect::<Vec<_>>();
+            if current_input_ids != connected_input_ids {
+                active_connections.clear();
+                connected_input_ids.clear();
+
+                for input in &known_inputs {
+                    let mut midi_input = match MidiInput::new("303util-midi-realtime") {
+                        Ok(input_handle) => input_handle,
+                        Err(error) => {
+                            emit_midi_error(&app, format!("Failed to create MIDI input stream: {error}"));
+                            continue;
+                        }
+                    };
+                    midi_input.ignore(Ignore::None);
+                    let Some((port_index_text, _)) = input.id.split_once(':') else {
+                        continue;
+                    };
+                    let Ok(port_index) = port_index_text.parse::<usize>() else {
+                        continue;
+                    };
+                    let ports = midi_input.ports();
+                    let Some(port) = ports.get(port_index) else {
+                        continue;
+                    };
+                    let source_id = input.id.clone();
+                    let source_name = input.name.clone();
+                    let app_handle = app.clone();
+                    match midi_input.connect(
+                        port,
+                        "303util-midi-clock",
+                        move |timestamp, message, _| {
+                            if let Some(payload) =
+                                midi_event_from_message(&source_id, &source_name, timestamp, message)
+                            {
+                                let _ = app_handle.emit(MIDI_REALTIME_EVENT, payload);
+                            }
+                        },
+                        (),
+                    ) {
+                        Ok(connection) => {
+                            active_connections.push(connection);
+                            connected_input_ids.push(input.id.clone());
+                        }
+                        Err(error) => emit_midi_error(
+                            &app,
+                            format!("Failed to connect MIDI input \"{}\": {error}", input.name),
+                        ),
+                    }
+                }
+            }
+
+            thread::sleep(Duration::from_millis(900));
+        }
+    })
 }
 
 fn random_token(length: usize) -> String {
@@ -202,12 +371,52 @@ fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
         .map_err(|error| format!("Failed to open system browser: {error}"))
 }
 
+#[tauri::command]
+fn midi_list_inputs() -> Result<Vec<MidiInputPortInfo>, String> {
+    list_midi_inputs()
+}
+
+#[tauri::command]
+fn midi_start_realtime_stream(app: AppHandle, midi_worker_state: State<MidiWorkerState>) -> Result<(), String> {
+    let mut worker_slot = midi_worker_state
+        .0
+        .lock()
+        .map_err(|_| "Failed to lock MIDI worker state.".to_string())?;
+    if worker_slot.is_some() {
+        return Ok(());
+    }
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let join = spawn_midi_worker(app, shutdown.clone());
+    *worker_slot = Some(MidiWorkerHandle { shutdown, join });
+    Ok(())
+}
+
+#[tauri::command]
+fn midi_stop_realtime_stream(midi_worker_state: State<MidiWorkerState>) -> Result<(), String> {
+    let mut worker_slot = midi_worker_state
+        .0
+        .lock()
+        .map_err(|_| "Failed to lock MIDI worker state.".to_string())?;
+    if let Some(worker) = worker_slot.take() {
+        worker.shutdown.store(true, Ordering::Relaxed);
+        let _ = worker.join.join();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(MidiWorkerState::default())
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![desktop_google_drive_access_token, open_external_url])
+        .invoke_handler(tauri::generate_handler![
+            desktop_google_drive_access_token,
+            open_external_url,
+            midi_list_inputs,
+            midi_start_realtime_stream,
+            midi_stop_realtime_stream
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

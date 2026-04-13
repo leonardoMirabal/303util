@@ -187,6 +187,25 @@ body {
   gap: 8px;
 }
 
+.midi-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.midi-status-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #5b6672;
+  border-radius: 8px;
+  background: #394049;
+}
+
+.midi-toggle-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .debug-metric-card {
   display: grid;
   gap: 4px;
@@ -1883,7 +1902,7 @@ button.selected {
 
   .mobile-header-groups {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
   }
 
@@ -1964,7 +1983,18 @@ button.selected {
     gap: 4px;
   }
 
+  .midi-status-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
   .debug-metric-card {
+    gap: 2px;
+    padding: 4px;
+    border-radius: 6px;
+  }
+
+  .midi-status-card {
     gap: 2px;
     padding: 4px;
     border-radius: 6px;

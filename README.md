@@ -149,7 +149,7 @@ The control strip always edits the **currently selected voice**.
 ### Main controls
 
 - **BPM**: overall tempo
-- **1/2**: halves the current tempo until you toggle it back
+- **1/2**: halves the current tempo until you toggle it back, including while slaved to MIDI clock
 - **Wave**: switches between saw and square
 - **Tune**: pitch offset
 - **Cutoff**
@@ -172,6 +172,42 @@ The control strip always edits the **currently selected voice**.
 - **Reverb / REV**
 
 On phones and small screens, use **Controls** to show or hide the knob section and **Mods** to show or hide the sequencing lanes.
+
+## MIDI clock sync
+
+Use the **MIDI** tab in the menu when you want the app to follow an external clock source in either the **browser** or the installed **app**.
+
+![MIDI sync waiting for clock](docs/screenshots/midi-sync-waiting.png)
+
+### MIDI modes
+
+- **Off**: disables external MIDI clock input completely
+- **Auto**: arms MIDI clock sync and automatically follows the first active clock source
+- **MIDI In**: arms MIDI clock sync but only listens to the device you choose manually
+
+### MIDI controls
+
+- **Runtime** shows whether you are using the browser or app MIDI path
+- **Status** shows whether MIDI is off, waiting, synced, or in error
+- **Source** shows the current clock source and live BPM once synced
+- **MIDI input device** selects the preferred or required input port
+- **Refresh** rescans available MIDI input devices
+- **MIDI delay offset** shifts the incoming clock timing to compensate for interface or device jitter
+
+![MIDI sync locked to external clock](docs/screenshots/midi-sync-synced.png)
+
+### How Auto mode behaves
+
+- If **no MIDI clock is being received**, the app keeps using the internal transport and you can still press **Play**, adjust **BPM**, and use **1/2**
+- As soon as MIDI clock arrives, playback switches to external sync and the header BPM badge changes to **EXT**
+- If clock stops, the app falls back to local tempo control again
+
+### External sync notes
+
+- **Start**, **Continue**, and **Stop** messages are followed when the selected MIDI mode is armed
+- The **1/2** button still works while synced by dividing the external transport speed in half
+- Browser and app runtimes share the same MIDI UI and behavior, but the **Runtime** card tells you which MIDI backend is active
+- MIDI sync settings are local app settings, not part of exported pattern JSON
 
 ### FX menu sections
 

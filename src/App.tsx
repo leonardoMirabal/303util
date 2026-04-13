@@ -3,6 +3,13 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
 import { ensureAudioGraph, playScheduledStep, prepareAudioGraph, stopAudioVoices, syncLineAudioState, type AudioLineFx } from "./audioEngine";
+import {
+  createMidiClockRuntime,
+  type MidiClockMode,
+  type MidiClockRuntime,
+  type MidiInputPortInfo,
+  type MidiRealtimeEvent,
+} from "./midiClock";
 import "./App.css";
 
 const STEPS = 32;
@@ -75,6 +82,13 @@ type FxVisibilitySettings = {
   reverb: boolean;
   overdrive: boolean;
   distortion: boolean;
+};
+
+type MidiClockSettings = {
+  enabled: boolean;
+  mode: MidiClockMode;
+  deviceId: string | null;
+  delayOffsetMs: number;
 };
 
 type LineState = {
@@ -199,6 +213,10 @@ const DRIVE_BACKUP_FOLDER_NAME = "TB-303 Companion Backups";
 const DRIVE_BACKUP_FILE_NAME = "tb303-backup.json";
 const GOOGLE_SYNC_ENABLED_KEY = "tb303:google-sync-enabled";
 const FX_VISIBILITY_KEY = "tb303:fx-visibility";
+const MIDI_CLOCK_ENABLED_KEY = "tb303:midi-clock-enabled";
+const MIDI_CLOCK_MODE_KEY = "tb303:midi-clock-mode";
+const MIDI_CLOCK_DEVICE_ID_KEY = "tb303:midi-clock-device-id";
+const MIDI_CLOCK_DELAY_OFFSET_KEY = "tb303:midi-clock-delay-offset-ms";
 const DEFAULT_UNSAVED_PATTERN_NAME = "changeme";
 const MAX_VISIBLE_FX = 3;
 const FX_VISIBILITY_ORDER: Array<keyof FxVisibilitySettings> = ["delay", "reverb", "overdrive", "distortion"];
@@ -207,6 +225,12 @@ const DEFAULT_FX_VISIBILITY_SETTINGS: FxVisibilitySettings = {
   reverb: true,
   overdrive: true,
   distortion: false,
+};
+const DEFAULT_MIDI_CLOCK_SETTINGS: MidiClockSettings = {
+  enabled: false,
+  mode: "auto",
+  deviceId: null,
+  delayOffsetMs: 0,
 };
 
 let googleScriptPromise: Promise<void> | null = null;
@@ -522,7 +546,7 @@ type KnobProps = {
   disabled?: boolean;
 };
 
-type MobileHeaderSection = "pattern" | "scale" | "fx" | "utilities";
+type MobileHeaderSection = "pattern" | "scale" | "fx" | "midi" | "utilities";
 type FxMenuSection = keyof FxVisibilitySettings;
 type NewPatternModalMode = "create" | "save";
 
@@ -782,12 +806,28 @@ const loadFxVisibilitySettings = (): FxVisibilitySettings => {
   }
 };
 
+const loadMidiClockSettings = (): MidiClockSettings => {
+  const enabled = window.localStorage.getItem(MIDI_CLOCK_ENABLED_KEY) === "1";
+  const mode = window.localStorage.getItem(MIDI_CLOCK_MODE_KEY) === "device" ? "device" : "auto";
+  const storedDeviceId = window.localStorage.getItem(MIDI_CLOCK_DEVICE_ID_KEY)?.trim() || "";
+  const rawDelayOffset = Number(window.localStorage.getItem(MIDI_CLOCK_DELAY_OFFSET_KEY) ?? "0");
+  return {
+    ...DEFAULT_MIDI_CLOCK_SETTINGS,
+    enabled,
+    mode,
+    deviceId: storedDeviceId || null,
+    delayOffsetMs: Number.isFinite(rawDelayOffset) ? Math.max(-100, Math.min(100, Math.round(rawDelayOffset))) : 0,
+  };
+};
+
 const stepSecondsForTimingMode = (tempo: number, mode: PatternTimingMode): number => (60 / tempo) / (mode === "triplet" ? 3 : 4);
+const pulsesPerStepForTimingMode = (mode: PatternTimingMode): number => (mode === "triplet" ? 8 : 6);
 const VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS = 0.3;
 const HIDDEN_SCHEDULER_LOOKAHEAD_SECONDS = 2.2;
 const VISIBLE_SCHEDULER_INTERVAL_MS = 25;
 const HIDDEN_SCHEDULER_INTERVAL_MS = 250;
 const TRANSPORT_START_LEAD_SECONDS = 0.08;
+const MIDI_CLOCK_DELTA_WINDOW = 12;
 
 const loadGoogleScript = (): Promise<void> => {
   if (googleScriptPromise) return googleScriptPromise;
@@ -1311,6 +1351,11 @@ const drawVoiceSheet = (
 };
 
 function App() {
+  const midiRuntimeRef = useRef<MidiClockRuntime | null>(null);
+  if (!midiRuntimeRef.current) {
+    midiRuntimeRef.current = createMidiClockRuntime();
+  }
+  const midiRuntime = midiRuntimeRef.current;
   const [lineCount, setLineCount] = useState<1 | 2 | 3>(DEFAULT_PROJECT_STATE.lineCount);
   const [tempo, setTempo] = useState(DEFAULT_PROJECT_STATE.tempo);
   const [halfTempoBase, setHalfTempoBase] = useState<number | null>(null);
@@ -1360,6 +1405,16 @@ function App() {
   const [isInitDialogOpen, setIsInitDialogOpen] = useState(false);
   const [fxVisibility, setFxVisibility] = useState<FxVisibilitySettings>(() => loadFxVisibilitySettings());
   const [selectedFxMenu, setSelectedFxMenu] = useState<FxMenuSection>("delay");
+  const [midiClockSettings, setMidiClockSettings] = useState<MidiClockSettings>(() => loadMidiClockSettings());
+  const [midiInputs, setMidiInputs] = useState<MidiInputPortInfo[]>([]);
+  const [midiStatus, setMidiStatus] = useState<"idle" | "connecting" | "waiting" | "synced" | "unsupported" | "error">(
+    midiRuntime.supported ? "idle" : "unsupported",
+  );
+  const [midiStatusMessage, setMidiStatusMessage] = useState(
+    midiRuntime.supported ? "MIDI clock input is off." : "MIDI input is not supported in this runtime.",
+  );
+  const [midiCurrentSource, setMidiCurrentSource] = useState<MidiInputPortInfo | null>(null);
+  const [midiClockTempo, setMidiClockTempo] = useState<number | null>(null);
   const [debugMetrics, setDebugMetrics] = useState<DebugMetricsState>({
     cpuPercent: 0,
     cpuDetail: "Main-thread load estimate.",
@@ -1379,6 +1434,7 @@ function App() {
   const reverbBufferRef = useRef<AudioBuffer | null>(null);
   const lineFxRef = useRef<Array<AudioLineFx | null>>(Array.from({ length: MAX_LINES }, () => null));
   const playheadRef = useRef(-1);
+  const isPlayingRef = useRef(false);
   const linesRef = useRef(lines);
   const lineCountRef = useRef(lineCount);
   const selectedLineRef = useRef(selectedLine);
@@ -1390,6 +1446,15 @@ function App() {
   const lastDriveBackupSignatureRef = useRef("");
   const driveBackupTimerRef = useRef<number | null>(null);
   const scheduledPlayheadTimeoutsRef = useRef<number[]>([]);
+  const midiClockSettingsRef = useRef(midiClockSettings);
+  const midiClockPulseCounterRef = useRef<number[]>(Array.from({ length: MAX_LINES }, () => 0));
+  const midiSourceLockRef = useRef<MidiInputPortInfo | null>(null);
+  const midiLastClockTimestampRef = useRef<number | null>(null);
+  const midiRecentClockDeltasRef = useRef<number[]>([]);
+  const midiSmoothedTempoRef = useRef<number | null>(null);
+  const midiClockTimeoutRef = useRef<number | null>(null);
+  const effectiveTempoRef = useRef(tempo);
+  const halfTempoBaseRef = useRef<number | null>(halfTempoBase);
 
   const setPlayheadValue = (value: number) => {
     if (playheadRef.current === value) return;
@@ -1411,6 +1476,166 @@ function App() {
     voiceTickRef.current.fill(0);
     nextStepTimeRef.current.fill(startTime);
   };
+
+  const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
+    if (lineIndex !== selectedLineRef.current) return;
+    const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
+    if (delayMs <= 8) {
+      setPlayheadValue(stepIndex);
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      scheduledPlayheadTimeoutsRef.current = scheduledPlayheadTimeoutsRef.current.filter((id) => id !== timeoutId);
+      if (selectedLineRef.current === lineIndex) {
+        setPlayheadValue(stepIndex);
+      }
+    }, delayMs);
+    scheduledPlayheadTimeoutsRef.current.push(timeoutId);
+  };
+
+  const clearMidiClockTimeout = () => {
+    if (midiClockTimeoutRef.current !== null) {
+      window.clearTimeout(midiClockTimeoutRef.current);
+      midiClockTimeoutRef.current = null;
+    }
+  };
+
+  const clearMidiClockTracking = (clearSourceLock = false) => {
+    clearMidiClockTimeout();
+    midiClockPulseCounterRef.current.fill(0);
+    midiLastClockTimestampRef.current = null;
+    midiRecentClockDeltasRef.current = [];
+    midiSmoothedTempoRef.current = null;
+    setMidiClockTempo(null);
+    if (clearSourceLock) {
+      midiSourceLockRef.current = null;
+      setMidiCurrentSource(null);
+    }
+  };
+
+  const stopMidiTransport = (preservePosition = true, clearSourceLock = false) => {
+    transportStartTimeRef.current = null;
+    clearScheduledPlayheadUpdates();
+    setPlayheadValue(-1);
+    midiClockPulseCounterRef.current.fill(0);
+    stopAudioVoices(audioRef, lineFxRef);
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    if (!preservePosition) {
+      resetPlaybackState();
+    }
+    if (clearSourceLock) {
+      midiSourceLockRef.current = null;
+      setMidiCurrentSource(null);
+    }
+  };
+
+  const updateMidiStatusForWaitingSource = (message: string) => {
+    setMidiStatus("waiting");
+    setMidiStatusMessage(message);
+  };
+
+  const refreshMidiInputs = async () => {
+    if (!midiRuntime.supported) return;
+    try {
+      const inputs = await midiRuntime.refreshInputs();
+      setMidiInputs(inputs);
+      if (!midiClockSettingsRef.current.enabled) {
+        setMidiStatus("idle");
+        setMidiStatusMessage(inputs.length > 0 ? "MIDI clock input is off." : "No MIDI inputs are available yet.");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not refresh MIDI inputs.";
+      setMidiStatus("error");
+      setMidiStatusMessage(message);
+    }
+  };
+
+  const acceptMidiSourceEvent = (event: MidiRealtimeEvent): boolean => {
+    const settings = midiClockSettingsRef.current;
+    if (!settings.enabled) return false;
+
+    if (settings.mode === "device") {
+      if (!settings.deviceId || event.sourceId !== settings.deviceId) {
+        return false;
+      }
+      setMidiCurrentSource({ id: event.sourceId, name: event.sourceName });
+      return true;
+    }
+
+    const lockedSource = midiSourceLockRef.current;
+    if (lockedSource && lockedSource.id !== event.sourceId) {
+      return false;
+    }
+    if (!lockedSource) {
+      const nextSource = { id: event.sourceId, name: event.sourceName };
+      midiSourceLockRef.current = nextSource;
+      setMidiCurrentSource(nextSource);
+    }
+    return true;
+  };
+
+  const armMidiClockTimeout = () => {
+    clearMidiClockTimeout();
+    midiClockTimeoutRef.current = window.setTimeout(() => {
+      stopMidiTransport(true, midiClockSettingsRef.current.mode === "auto");
+      clearMidiClockTracking(midiClockSettingsRef.current.mode === "auto");
+      updateMidiStatusForWaitingSource(
+        midiClockSettingsRef.current.mode === "device"
+          ? "Waiting for MIDI clock from the selected device."
+          : "Waiting for MIDI clock. Auto mode will lock to the next active source.",
+      );
+    }, 1500);
+  };
+
+  const setMidiClockEnabled = async (enabled: boolean) => {
+    if (enabled && midiRuntime.supported) {
+      transportStartTimeRef.current = null;
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      stopAudioVoices(audioRef, lineFxRef);
+      resetPlaybackState();
+      clearMidiClockTracking(true);
+      try {
+        const graph = await prepareAudio();
+        if (graph?.ctx.state === "suspended") {
+          await graph.ctx.resume();
+        }
+      } catch {
+        // Keep MIDI enablement independent from whether audio could be resumed right now.
+      }
+    }
+
+    if (!enabled) {
+      clearMidiClockTracking(true);
+      stopMidiTransport(false, true);
+      setMidiInputs([]);
+      setMidiStatus(midiRuntime.supported ? "idle" : "unsupported");
+      setMidiStatusMessage(midiRuntime.supported ? "MIDI clock input is off." : "MIDI input is not supported in this runtime.");
+    }
+
+    setMidiClockSettings((prev) => ({ ...prev, enabled }));
+  };
+
+  const setMidiClockUiMode = async (mode: "off" | "auto" | "device") => {
+    if (mode === "off") {
+      await setMidiClockEnabled(false);
+      return;
+    }
+
+    if (!midiClockSettingsRef.current.enabled) {
+      await setMidiClockEnabled(true);
+    }
+
+    setMidiClockSettings((prev) => ({
+      ...prev,
+      enabled: true,
+      mode: mode === "device" ? "device" : "auto",
+      deviceId: prev.deviceId ?? (mode === "device" ? midiInputs[0]?.id ?? null : prev.deviceId),
+    }));
+  };
+
+  const midiClockScheduleOffsetSeconds = (): number => midiClockSettingsRef.current.delayOffsetMs / 1000;
 
   const buildProjectSnapshot = (): ProjectData => ({
     version: 1,
@@ -1481,8 +1706,14 @@ function App() {
   const ensureAudio = (lineIndex?: number) => ensureAudioGraph(audioRef, masterRef, reverbBufferRef, lineFxRef, lineIndex);
   const prepareAudio = () => prepareAudioGraph(audioRef, masterRef, reverbBufferRef);
   const togglePlaybackTransport = async () => {
+    if (midiClockSettingsRef.current.enabled && midiSmoothedTempoRef.current !== null) {
+      updateMidiStatusForWaitingSource("Playback is following the selected MIDI clock source.");
+      return;
+    }
+
     if (isPlaying) {
       transportStartTimeRef.current = null;
+      isPlayingRef.current = false;
       setIsPlaying(false);
       stopAudioVoices(audioRef, lineFxRef);
       resetPlaybackState();
@@ -1501,6 +1732,7 @@ function App() {
       const transportStartTime = graph.ctx.currentTime + TRANSPORT_START_LEAD_SECONDS;
       syncAllLineAudioState(Math.max(graph.ctx.currentTime, transportStartTime - 0.05));
       transportStartTimeRef.current = transportStartTime;
+      isPlayingRef.current = true;
       setIsPlaying(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start audio.";
@@ -1716,7 +1948,7 @@ function App() {
       stepIndex,
       stepLenSeconds,
       startTime,
-      tempo,
+      tempo: effectiveTempoRef.current,
       audioRef,
       masterRef,
       reverbBufferRef,
@@ -1733,7 +1965,7 @@ function App() {
       syncLineAudioState({
         lineIndex: li,
         params: applyFxVisibilityToParams(linesNow[li].params),
-        tempo,
+        tempo: effectiveTempoRef.current,
         audioRef,
         masterRef,
         reverbBufferRef,
@@ -1743,17 +1975,150 @@ function App() {
     }
   };
 
+  const scheduleMidiStepAtTime = (lineIndex: number, stepTime: number, currentTime: number) => {
+    const line = linesRef.current[lineIndex];
+    if (!line) return;
+    const voiceLength = clampPatternLength(line.patternLength, line.timingMode);
+    const playableLength = playablePatternLengthForMode(voiceLength, line.timingMode);
+    if (playableLength <= 0) return;
+    const stepIndex = voiceStepRef.current[lineIndex] % playableLength;
+    playStep(lineIndex, line, stepIndex, stepSecondsForTimingMode(Math.max(1, effectiveTempoRef.current), line.timingMode), stepTime);
+    schedulePlayheadUpdate(lineIndex, stepIndex, stepTime, currentTime);
+    voiceStepRef.current[lineIndex] += 1;
+    voiceTickRef.current[lineIndex] += 1;
+  };
+
+  const startMidiTransportFromExternal = async (resetPosition: boolean) => {
+    const graph = await prepareAudio();
+    if (!graph) return;
+    if (graph.ctx.state === "suspended") {
+      try {
+        await graph.ctx.resume();
+      } catch {
+        setMidiStatus("error");
+        setMidiStatusMessage("Audio is blocked. Tap the MIDI enable button again to unlock audio output.");
+        return;
+      }
+    }
+    for (let li = 0; li < lineCountRef.current; li += 1) {
+      ensureAudio(li);
+    }
+
+    const currentTime = graph.ctx.currentTime;
+    const stepTime = Math.max(currentTime + 0.001, currentTime + 0.01 + midiClockScheduleOffsetSeconds());
+    syncAllLineAudioState(Math.max(currentTime, stepTime - 0.03));
+
+    if (resetPosition) {
+      stopAudioVoices(audioRef, lineFxRef, stepTime);
+      resetPlaybackState(stepTime);
+      midiClockPulseCounterRef.current.fill(0);
+      for (let li = 0; li < lineCountRef.current; li += 1) {
+        scheduleMidiStepAtTime(li, stepTime, currentTime);
+      }
+    } else {
+      midiClockPulseCounterRef.current.fill(0);
+    }
+
+    isPlayingRef.current = true;
+    setIsPlaying(true);
+  };
+
+  const handleMidiRealtimeEvent = async (event: MidiRealtimeEvent) => {
+    if (!acceptMidiSourceEvent(event)) return;
+    const sourceLabel = event.sourceName;
+
+    if (event.kind === "clock") {
+      const previousTimestamp = midiLastClockTimestampRef.current;
+      midiLastClockTimestampRef.current = event.timestampMillis;
+      if (previousTimestamp !== null) {
+        const delta = event.timestampMillis - previousTimestamp;
+        if (delta > 1 && delta < 1000) {
+          const recentDeltas = midiRecentClockDeltasRef.current;
+          recentDeltas.push(delta);
+          if (recentDeltas.length > MIDI_CLOCK_DELTA_WINDOW) {
+            recentDeltas.shift();
+          }
+          const averageDelta = recentDeltas.reduce((sum, value) => sum + value, 0) / recentDeltas.length;
+          const instantTempo = 60000 / (averageDelta * 24);
+          const smoothedTempo =
+            midiSmoothedTempoRef.current === null || recentDeltas.length < 4
+              ? instantTempo
+              : midiSmoothedTempoRef.current * 0.55 + instantTempo * 0.45;
+          midiSmoothedTempoRef.current = smoothedTempo;
+          setMidiClockTempo(smoothedTempo);
+        }
+      }
+      armMidiClockTimeout();
+      setMidiStatus("synced");
+      setMidiStatusMessage(`Receiving MIDI clock from ${sourceLabel}.`);
+      if (!isPlayingRef.current) return;
+
+      const ctx = audioRef.current;
+      const currentTime = ctx?.currentTime ?? 0;
+      const stepTime = Math.max(currentTime + 0.001, currentTime + 0.01 + midiClockScheduleOffsetSeconds());
+      for (let li = 0; li < lineCountRef.current; li += 1) {
+        midiClockPulseCounterRef.current[li] += 1;
+        const line = linesRef.current[li];
+        if (!line) continue;
+        const pulsesPerStep = pulsesPerStepForTimingMode(line.timingMode) * (halfTempoBaseRef.current === null ? 1 : 2);
+        if (midiClockPulseCounterRef.current[li] < pulsesPerStep) continue;
+        midiClockPulseCounterRef.current[li] -= pulsesPerStep;
+        scheduleMidiStepAtTime(li, stepTime, currentTime);
+      }
+      return;
+    }
+
+    if (event.kind === "start") {
+      clearMidiClockTracking(midiClockSettingsRef.current.mode === "auto");
+      setMidiCurrentSource({ id: event.sourceId, name: event.sourceName });
+      if (midiClockSettingsRef.current.mode === "auto") {
+        midiSourceLockRef.current = { id: event.sourceId, name: event.sourceName };
+      }
+      updateMidiStatusForWaitingSource(`MIDI start received from ${sourceLabel}. Waiting for clock pulses...`);
+      await startMidiTransportFromExternal(true);
+      return;
+    }
+
+    if (event.kind === "continue") {
+      updateMidiStatusForWaitingSource(`MIDI continue received from ${sourceLabel}. Waiting for clock pulses...`);
+      await startMidiTransportFromExternal(false);
+      return;
+    }
+
+    clearMidiClockTracking(false);
+    stopMidiTransport(true, false);
+    updateMidiStatusForWaitingSource(`MIDI stop received from ${sourceLabel}.`);
+  };
+
   useEffect(() => {
     linesRef.current = lines;
   }, [lines]);
   useEffect(() => {
+    midiClockSettingsRef.current = midiClockSettings;
+  }, [midiClockSettings]);
+  useEffect(() => {
+    halfTempoBaseRef.current = halfTempoBase;
+  }, [halfTempoBase]);
+  useEffect(() => {
+    const nextTempo =
+      midiClockSettings.enabled && midiClockTempo !== null
+        ? halfTempoBase === null
+          ? midiClockTempo
+          : midiClockTempo / 2
+        : tempo;
+    effectiveTempoRef.current = Math.max(1, nextTempo);
+  }, [halfTempoBase, midiClockSettings.enabled, midiClockTempo, tempo]);
+  useEffect(() => {
     const ctx = audioRef.current;
     if (!ctx) return;
     syncAllLineAudioState(ctx.currentTime);
-  }, [fxVisibility, lineCount, lines, tempo]);
+  }, [fxVisibility, halfTempoBase, lineCount, lines, tempo, midiClockTempo, midiClockSettings.enabled]);
   useEffect(() => {
     lineCountRef.current = lineCount;
   }, [lineCount]);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
   useEffect(() => {
     selectedLineRef.current = selectedLine;
   }, [selectedLine]);
@@ -1806,6 +2171,148 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(FX_VISIBILITY_KEY, JSON.stringify(fxVisibility));
   }, [fxVisibility]);
+  useEffect(() => {
+    window.localStorage.setItem(MIDI_CLOCK_ENABLED_KEY, midiClockSettings.enabled ? "1" : "0");
+    window.localStorage.setItem(MIDI_CLOCK_MODE_KEY, midiClockSettings.mode);
+    window.localStorage.setItem(MIDI_CLOCK_DELAY_OFFSET_KEY, String(midiClockSettings.delayOffsetMs));
+    if (midiClockSettings.deviceId) {
+      window.localStorage.setItem(MIDI_CLOCK_DEVICE_ID_KEY, midiClockSettings.deviceId);
+    } else {
+      window.localStorage.removeItem(MIDI_CLOCK_DEVICE_ID_KEY);
+    }
+  }, [midiClockSettings]);
+
+  useEffect(() => {
+    if (!midiRuntime.supported || midiRuntime.kind !== "tauri") return;
+    void refreshMidiInputs();
+  }, [midiRuntime]);
+
+  useEffect(() => {
+    if (!midiClockSettings.enabled) {
+      void midiRuntime.stop();
+      return;
+    }
+    if (!midiRuntime.supported) {
+      setMidiStatus("unsupported");
+      setMidiStatusMessage("MIDI input is not supported in this runtime.");
+      return;
+    }
+
+    let cancelled = false;
+    setMidiStatus("connecting");
+    setMidiStatusMessage("Connecting to MIDI inputs...");
+
+    void (async () => {
+      try {
+        const result = await midiRuntime.start({
+          onRealtime: (event) => {
+            void handleMidiRealtimeEvent(event);
+          },
+          onInputsChanged: (inputs) => {
+            setMidiInputs(inputs);
+          },
+          onError: (message) => {
+            setMidiStatus("error");
+            setMidiStatusMessage(message);
+          },
+        });
+        if (cancelled) {
+          return;
+        }
+        setMidiInputs(result.inputs);
+        setMidiStatus("waiting");
+        setMidiStatusMessage(
+          result.inputs.length > 0
+            ? midiClockSettingsRef.current.mode === "device"
+              ? "Waiting for MIDI clock from the selected device."
+              : "Waiting for MIDI clock. Auto mode will lock to the first active source."
+            : "No MIDI inputs are available yet.",
+        );
+        if (midiClockSettingsRef.current.mode === "device" && !midiClockSettingsRef.current.deviceId && result.inputs[0]) {
+          setMidiClockSettings((prev) => ({ ...prev, deviceId: result.inputs[0].id }));
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not start MIDI input.";
+        setMidiStatus("error");
+        setMidiStatusMessage(message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      clearMidiClockTimeout();
+      void midiRuntime.stop();
+    };
+  }, [midiClockSettings.enabled, midiRuntime]);
+
+  useEffect(() => {
+    if (!midiClockSettings.enabled || midiRuntime.kind !== "web") return;
+
+    let cancelled = false;
+    const unlockAudio = async () => {
+      const graph = await prepareAudio();
+      if (cancelled || !graph || graph.ctx.state !== "suspended") return;
+      try {
+        await graph.ctx.resume();
+      } catch {
+        // Browsers can still reject resume until a later gesture; keep listening.
+      }
+    };
+    const handleInteraction = () => {
+      void unlockAudio();
+    };
+
+    window.addEventListener("pointerdown", handleInteraction, { passive: true });
+    window.addEventListener("keydown", handleInteraction);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pointerdown", handleInteraction);
+      window.removeEventListener("keydown", handleInteraction);
+    };
+  }, [midiClockSettings.enabled, midiRuntime.kind]);
+
+  useEffect(() => {
+    if (!midiClockSettings.enabled) return;
+    clearMidiClockTracking(true);
+    stopMidiTransport(true, true);
+    setMidiStatus("waiting");
+    setMidiStatusMessage(
+      midiClockSettings.mode === "device"
+        ? "Waiting for MIDI clock from the selected device."
+        : midiClockSettings.deviceId
+          ? "Waiting for MIDI clock from the preferred auto device."
+          : "Waiting for MIDI clock. Auto mode will lock to the first active source.",
+    );
+  }, [midiClockSettings.mode, midiClockSettings.deviceId]);
+
+  useEffect(() => {
+    if (!midiClockSettings.enabled) return;
+    if (midiClockSettings.mode === "device" && !midiClockSettings.deviceId && midiInputs[0]) {
+      setMidiClockSettings((prev) => ({ ...prev, deviceId: midiInputs[0].id }));
+      return;
+    }
+
+    if (midiClockSettings.mode === "device" && midiClockSettings.deviceId && !midiInputs.some((input) => input.id === midiClockSettings.deviceId)) {
+      stopMidiTransport(true, false);
+      clearMidiClockTracking(false);
+      setMidiCurrentSource(null);
+      setMidiStatus("waiting");
+      setMidiStatusMessage("The selected MIDI input is not available.");
+      return;
+    }
+
+    if (midiCurrentSource && !midiInputs.some((input) => input.id === midiCurrentSource.id)) {
+      stopMidiTransport(true, midiClockSettings.mode === "auto");
+      clearMidiClockTracking(midiClockSettings.mode === "auto");
+      setMidiStatus("waiting");
+      setMidiStatusMessage(
+        midiClockSettings.mode === "device"
+          ? "The selected MIDI input is not available."
+          : "Waiting for MIDI clock. Auto mode will lock to the next active source.",
+      );
+    }
+  }, [midiClockSettings.deviceId, midiClockSettings.enabled, midiClockSettings.mode, midiCurrentSource, midiInputs]);
 
   useEffect(() => {
     transposeOriginRef.current = null;
@@ -1865,6 +2372,7 @@ function App() {
     };
   }, [googleAccessToken, libraries, patterns, selectedLibraryId, selectedPatternId]);
   useEffect(() => {
+    if (midiClockSettings.enabled && midiClockTempo !== null) return;
     if (!isPlaying) return;
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -1887,25 +2395,10 @@ function App() {
       syncAllLineAudioState(Math.max(ctx?.currentTime ?? 0, startTime - 0.05));
       transportStartTimeRef.current = null;
       resetPlaybackState(startTime);
-      const normalStepSeconds = stepSecondsForTimingMode(tempo, "normal");
-      const tripletStepSeconds = stepSecondsForTimingMode(tempo, "triplet");
+      const normalStepSeconds = stepSecondsForTimingMode(effectiveTempoRef.current, "normal");
+      const tripletStepSeconds = stepSecondsForTimingMode(effectiveTempoRef.current, "triplet");
       const visibleLookaheadSeconds = VISIBLE_SCHEDULER_LOOKAHEAD_SECONDS;
       const visibleSchedulerIntervalMs = VISIBLE_SCHEDULER_INTERVAL_MS;
-      const schedulePlayheadUpdate = (lineIndex: number, stepIndex: number, stepTime: number, currentTime: number) => {
-        if (lineIndex !== selectedLineRef.current) return;
-        const delayMs = Math.max(0, (stepTime - currentTime) * 1000);
-        if (delayMs <= 8) {
-          setPlayheadValue(stepIndex);
-          return;
-        }
-        const timeoutId = window.setTimeout(() => {
-          scheduledPlayheadTimeoutsRef.current = scheduledPlayheadTimeoutsRef.current.filter((id) => id !== timeoutId);
-          if (selectedLineRef.current === lineIndex) {
-            setPlayheadValue(stepIndex);
-          }
-        }, delayMs);
-        scheduledPlayheadTimeoutsRef.current.push(timeoutId);
-      };
       const tick = () => {
         if (cancelled) return;
         const ctx = audioRef.current;
@@ -1946,7 +2439,7 @@ function App() {
       }
       clearScheduledPlayheadUpdates();
     };
-  }, [isPlaying, tempo]);
+  }, [isPlaying, midiClockSettings.enabled, tempo, midiClockTempo]);
 
   useEffect(() => {
     if (isPlaying) return;
@@ -3068,6 +3561,7 @@ function App() {
   const currentLibraryLabel = libraries.find((library) => library.id === selectedLibraryId)?.name ?? "Library";
   const currentPatternName = programName.trim() || selectedSavedPattern?.name || "Untitled";
   const currentPatternLabel = `${currentLibraryLabel} > ${currentPatternName}${hasUnsavedChanges ? " *" : ""}`;
+  const isMidiClockTransportActive = midiClockSettings.enabled && midiClockTempo !== null;
   const fxOptions: Array<{ key: keyof FxVisibilitySettings; label: string }> = [
     { key: "delay", label: "Delay" },
     { key: "reverb", label: "Reverb" },
@@ -3168,12 +3662,109 @@ function App() {
   const renderBpmVisualizer = (extraClassName?: string) => (
     <div
       className={extraClassName ? `bpm-visualizer ${extraClassName}` : "bpm-visualizer"}
-      aria-label={`Tempo ${tempo} BPM`}
-      title={`${tempo} BPM`}
+      aria-label={
+        midiClockSettings.enabled && midiClockTempo !== null
+          ? `External MIDI clock active at ${Math.round(effectiveTempoRef.current)} BPM`
+          : `Tempo ${Math.round(effectiveTempoRef.current)} BPM`
+      }
+      title={midiClockSettings.enabled && midiClockTempo !== null ? `${Math.round(effectiveTempoRef.current)} BPM (MIDI)` : `${tempo} BPM`}
     >
-      <span>{tempo}</span>
+      <span>{midiClockSettings.enabled && midiClockTempo !== null ? "EXT" : Math.round(effectiveTempoRef.current)}</span>
     </div>
   );
+
+  const renderMidiSettingsPanel = () => {
+    const runtimeLabel = midiRuntime.kind === "tauri" ? "App" : midiRuntime.kind === "web" ? "Browser" : "Unsupported";
+    const manualMode = midiClockSettings.mode === "device";
+    const midiUiMode: "off" | "auto" | "device" = !midiClockSettings.enabled ? "off" : manualMode ? "device" : "auto";
+    const selectedDeviceAvailable = midiClockSettings.deviceId ? midiInputs.some((input) => input.id === midiClockSettings.deviceId) : false;
+
+    return (
+      <div className="mobile-group-panel" id="mobile-header-panel">
+        <div className="settings-subsection">
+          <div className="settings-subsection-label">MIDI</div>
+          <div className="settings-helper">Choose Off, Auto, or MIDI In. Auto follows any active clock source, and MIDI In locks to the device you choose manually.</div>
+          <div className="midi-status-grid">
+            <div className="midi-status-card">
+              <span className="debug-metric-label">Runtime</span>
+              <strong className="debug-metric-value">{runtimeLabel}</strong>
+              <span className="debug-metric-detail">
+                {midiRuntime.supported ? "Realtime MIDI input is available here." : "This runtime cannot receive MIDI input."}
+              </span>
+            </div>
+            <div className="midi-status-card">
+              <span className="debug-metric-label">Status</span>
+              <strong className="debug-metric-value">{midiStatus.toUpperCase()}</strong>
+              <span className="debug-metric-detail">{midiStatusMessage}</span>
+            </div>
+            <div className="midi-status-card">
+              <span className="debug-metric-label">Source</span>
+              <strong className="debug-metric-value">{midiCurrentSource?.name ?? (midiUiMode === "device" ? "MIDI In" : midiUiMode === "auto" ? "Auto" : "Off")}</strong>
+              <span className="debug-metric-detail">
+                {midiCurrentSource
+                  ? `${midiCurrentSource.name}${midiClockTempo !== null ? ` · ${Math.round(effectiveTempoRef.current)} BPM${halfTempoBase === null ? "" : " (1/2)"}` : ""}`
+                  : midiUiMode === "off"
+                    ? "MIDI clock input is disabled."
+                    : manualMode
+                    ? selectedDeviceAvailable
+                      ? "Waiting for the selected device."
+                      : "Choose the correct input device."
+                    : selectedDeviceAvailable
+                      ? "Auto is on. The selected device is preferred, but any active source can lock first."
+                      : "Waiting to lock to the first active source."}
+               </span>
+             </div>
+           </div>
+          <div className="mobile-group-actions midi-toggle-grid">
+            <button type="button" className={midiUiMode === "off" ? "selected" : ""} onClick={() => void setMidiClockUiMode("off")} disabled={!midiRuntime.supported}>
+              Off
+            </button>
+            <button type="button" className={midiUiMode === "auto" ? "selected" : ""} onClick={() => void setMidiClockUiMode("auto")} disabled={!midiRuntime.supported}>
+              Auto
+            </button>
+            <button type="button" className={midiUiMode === "device" ? "selected" : ""} onClick={() => void setMidiClockUiMode("device")} disabled={!midiRuntime.supported}>
+              MIDI In
+            </button>
+            <button type="button" onClick={() => void refreshMidiInputs()} disabled={!midiRuntime.supported}>
+              Refresh
+            </button>
+          </div>
+          <label className="mobile-group-field">
+            MIDI input device
+            <select
+              value={midiClockSettings.deviceId ?? ""}
+              onChange={(event) => setMidiClockSettings((prev) => ({ ...prev, deviceId: event.currentTarget.value || null }))}
+              disabled={midiUiMode === "off" || !midiRuntime.supported}
+            >
+              <option value="">{midiInputs.length > 0 ? "Select input" : "No MIDI inputs available"}</option>
+              {midiInputs.map((input) => (
+                <option key={input.id} value={input.id}>
+                  {input.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="mobile-group-field">
+            MIDI delay offset
+            <input
+              type="number"
+              min={-100}
+              max={100}
+              step={1}
+              value={midiClockSettings.delayOffsetMs}
+              onChange={(event) =>
+                setMidiClockSettings((prev) => ({
+                  ...prev,
+                  delayOffsetMs: Math.max(-100, Math.min(100, Math.round(Number(event.currentTarget.value) || 0))),
+                }))
+              }
+              disabled={!midiClockSettings.enabled}
+            />
+          </label>
+        </div>
+      </div>
+    );
+  };
 
   const renderDebugPanel = () => (
     <div className="settings-subsection debug-metrics-panel">
@@ -3520,6 +4111,10 @@ function App() {
           </div>
         </div>
       );
+    }
+
+    if (mobileHeaderSection === "midi") {
+      return renderMidiSettingsPanel();
     }
 
     return (
@@ -3893,6 +4488,16 @@ function App() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={mobileHeaderSection === "midi"}
+                className={mobileHeaderSection === "midi" ? "selected" : ""}
+                onClick={() => toggleMobileHeaderSection("midi")}
+                aria-controls="mobile-header-panel"
+              >
+                MIDI
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={mobileHeaderSection === "utilities"}
                 className={mobileHeaderSection === "utilities" ? "selected" : ""}
                 onClick={() => toggleMobileHeaderSection("utilities")}
@@ -3924,7 +4529,12 @@ function App() {
               </button>
               <div className="mobile-summary-actions">
                 {renderBpmVisualizer()}
-                <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => void togglePlaybackTransport()}>
+                <button
+                  className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`}
+                  onClick={() => void togglePlaybackTransport()}
+                  disabled={isMidiClockTransportActive}
+                  title={isMidiClockTransportActive ? "Transport is controlled by MIDI clock." : undefined}
+                >
                   {isPlaying ? "Stop" : "Play"}
                 </button>
                 <div className="header-length-select">
@@ -3986,9 +4596,14 @@ function App() {
             </button>
             <div className="mobile-summary-actions">
               {renderBpmVisualizer("desktop-bpm-visualizer")}
-              <button className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`} onClick={() => void togglePlaybackTransport()}>
-                {isPlaying ? "Stop" : "Play"}
-              </button>
+                <button
+                  className={`play-button ${isPlaying ? "is-stopped" : "is-playing"}`}
+                  onClick={() => void togglePlaybackTransport()}
+                  disabled={isMidiClockTransportActive}
+                  title={isMidiClockTransportActive ? "Transport is controlled by MIDI clock." : undefined}
+                >
+                  {isPlaying ? "Stop" : "Play"}
+                </button>
               <button
                 type="button"
                 className={`tempo-action-button desktop-header-tempo-button${selectedTimingMode === "triplet" ? " is-active" : ""}`}
