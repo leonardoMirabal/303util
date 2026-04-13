@@ -4048,6 +4048,9 @@ function App() {
             <button type="button" onClick={() => openNewPatternModal(selectedLibraryId)}>
               New
             </button>
+            <button type="button" className={hasUnsavedChanges ? "selected" : ""} onClick={() => void saveSelectedPattern()}>
+              Save
+            </button>
             <button type="button" onClick={() => void runStorageAction("delete-pattern")} disabled={!selectedSavedPattern}>
               Delete
             </button>
