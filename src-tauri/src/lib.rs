@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+#[cfg(not(target_os = "android"))]
 use midir::{Ignore, MidiInput};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
@@ -80,6 +81,7 @@ fn emit_midi_error(app: &AppHandle, message: impl Into<String>) {
     );
 }
 
+#[cfg(not(target_os = "android"))]
 fn list_midi_inputs() -> Result<Vec<MidiInputPortInfo>, String> {
     let midi_input = MidiInput::new("303util-midi-inputs")
         .map_err(|error| format!("Failed to create MIDI input interface: {error}"))?;
@@ -99,6 +101,12 @@ fn list_midi_inputs() -> Result<Vec<MidiInputPortInfo>, String> {
     Ok(ports.into_values().collect())
 }
 
+#[cfg(target_os = "android")]
+fn list_midi_inputs() -> Result<Vec<MidiInputPortInfo>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "android"))]
 fn midi_event_from_message(
     source_id: &str,
     source_name: &str,
@@ -120,6 +128,7 @@ fn midi_event_from_message(
     })
 }
 
+#[cfg(not(target_os = "android"))]
 fn spawn_midi_worker(app: AppHandle, shutdown: Arc<AtomicBool>) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut known_inputs: Vec<MidiInputPortInfo> = Vec::new();
@@ -377,6 +386,7 @@ fn midi_list_inputs() -> Result<Vec<MidiInputPortInfo>, String> {
 }
 
 #[tauri::command]
+#[cfg(not(target_os = "android"))]
 fn midi_start_realtime_stream(app: AppHandle, midi_worker_state: State<MidiWorkerState>) -> Result<(), String> {
     let mut worker_slot = midi_worker_state
         .0
@@ -392,6 +402,14 @@ fn midi_start_realtime_stream(app: AppHandle, midi_worker_state: State<MidiWorke
 }
 
 #[tauri::command]
+#[cfg(target_os = "android")]
+fn midi_start_realtime_stream(app: AppHandle, _midi_worker_state: State<MidiWorkerState>) -> Result<(), String> {
+    emit_midi_error(&app, "Realtime MIDI input is not supported on Android.");
+    Err("Realtime MIDI input is not supported on Android.".to_string())
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "android"))]
 fn midi_stop_realtime_stream(midi_worker_state: State<MidiWorkerState>) -> Result<(), String> {
     let mut worker_slot = midi_worker_state
         .0
@@ -401,6 +419,12 @@ fn midi_stop_realtime_stream(midi_worker_state: State<MidiWorkerState>) -> Resul
         worker.shutdown.store(true, Ordering::Relaxed);
         let _ = worker.join.join();
     }
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(target_os = "android")]
+fn midi_stop_realtime_stream(_midi_worker_state: State<MidiWorkerState>) -> Result<(), String> {
     Ok(())
 }
 
