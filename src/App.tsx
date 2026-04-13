@@ -1627,6 +1627,15 @@ function App() {
       await setMidiClockEnabled(true);
     }
 
+    clearMidiClockTracking(true);
+    stopMidiTransport(true, true);
+    setMidiStatus("waiting");
+    setMidiStatusMessage(
+      mode === "device"
+        ? "Waiting for MIDI clock from the selected device."
+        : "Waiting for MIDI clock. Auto mode will lock to the first active source.",
+    );
+
     setMidiClockSettings((prev) => ({
       ...prev,
       enabled: true,
@@ -2085,8 +2094,8 @@ function App() {
       return;
     }
 
-    clearMidiClockTracking(false);
-    stopMidiTransport(true, false);
+    clearMidiClockTracking(midiClockSettingsRef.current.mode === "auto");
+    stopMidiTransport(true, midiClockSettingsRef.current.mode === "auto");
     updateMidiStatusForWaitingSource(`MIDI stop received from ${sourceLabel}.`);
   };
 
