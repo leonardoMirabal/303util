@@ -19,6 +19,8 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+mod png_export;
+
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REDIRECT_PATH: &str = "/callback";
@@ -434,6 +436,7 @@ pub fn run() {
         .manage(MidiWorkerState::default())
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(png_export::init())
         .invoke_handler(tauri::generate_handler![
             desktop_google_drive_access_token,
             open_external_url,
