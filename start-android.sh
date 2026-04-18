@@ -44,6 +44,27 @@ DEFAULT_AVD_NAME="Pixel_6_API_35"
 AVD_NAME="${1:-${ANDROID_AVD_NAME:-${DEFAULT_AVD_NAME}}}"
 EMULATOR_BIN="${ANDROID_EMULATOR_BIN:-}"
 
+detect_android_target() {
+  local abi_list="$1"
+  if [[ "${abi_list}" == *"arm64-v8a"* ]]; then
+    echo "aarch64 arm64"
+    return 0
+  fi
+  if [[ "${abi_list}" == *"armeabi-v7a"* ]]; then
+    echo "armv7 arm"
+    return 0
+  fi
+  if [[ "${abi_list}" == *"x86_64"* ]]; then
+    echo "x86_64 x86_64"
+    return 0
+  fi
+  if [[ "${abi_list}" == *"x86"* ]]; then
+    echo "i686 x86"
+    return 0
+  fi
+  return 1
+}
+
 if [ -z "${EMULATOR_BIN}" ]; then
   for candidate in \
     "${ANDROID_SDK_DIR}/emulator/emulator" \
@@ -149,6 +170,24 @@ echo "Connected devices:"
 adb devices
 
 DEVICE_SERIAL="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
+if [ -z "${DEVICE_SERIAL}" ]; then
+  echo "Error: no Android device detected."
+  exit 1
+fi
+
+DEVICE_ABI_LIST="$(adb -s "${DEVICE_SERIAL}" shell getprop ro.product.cpu.abilist 2>/dev/null | tr -d '\r')"
+if [ -z "${DEVICE_ABI_LIST}" ]; then
+  DEVICE_ABI_LIST="$(adb -s "${DEVICE_SERIAL}" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')"
+fi
+
+TARGET_INFO="$(detect_android_target "${DEVICE_ABI_LIST:-}")" || {
+  echo "Error: unsupported Android ABI list '${DEVICE_ABI_LIST}'."
+  exit 1
+}
+
+read -r TAURI_ANDROID_TARGET APK_OUTPUT_DIR <<<"${TARGET_INFO}"
+
+echo "Using Android device ${DEVICE_SERIAL} (${DEVICE_ABI_LIST})..."
 
 for package_name in "${APP_IDENTIFIER}" "com.app.app"; do
   if adb -s "${DEVICE_SERIAL}" shell pm list packages "${package_name}" | grep -Fq "package:${package_name}"; then
@@ -177,23 +216,25 @@ export VITE_APP_VERSION="${VITE_APP_VERSION:-0.0.0-dev}"
 export VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-android-debug-client-id}"
 export VITE_GOOGLE_DESKTOP_CLIENT_ID="${VITE_GOOGLE_DESKTOP_CLIENT_ID:-desktop-debug-client-id}"
 
-for port in 1420 1421; do
-  listener_pid="$(lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
-  if [ -z "${listener_pid}" ]; then
-    continue
-  fi
+echo "Building Android debug APK for ${TAURI_ANDROID_TARGET}..."
+npm run tauri -- android build --debug --apk --target "${TAURI_ANDROID_TARGET}" --ci
 
-  listener_command="$(ps -p "${listener_pid}" -o command= || true)"
-  if [[ "${listener_command}" == *"${SCRIPT_DIR}/node_modules/.bin/vite"* ]]; then
-    echo "Stopping stale Vite server on port ${port} (PID ${listener_pid})..."
-    kill "${listener_pid}"
-    wait "${listener_pid}" 2>/dev/null || true
-    continue
-  fi
+APK_PATH="$(find "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk" -type f -path "*/debug/*.apk" | sort | tail -n 1 || true)"
 
-  echo "Error: port ${port} is already in use by PID ${listener_pid}: ${listener_command}"
+if [ -z "${APK_PATH}" ] || [ ! -f "${APK_PATH}" ]; then
+  echo "Error: could not find a generated debug APK under:"
+  echo "  ${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk"
   exit 1
-done
+fi
 
-echo "Starting Tauri Android dev..."
-npm run tauri android dev
+echo "Using APK ${APK_PATH}..."
+echo "Installing APK on ${DEVICE_SERIAL}..."
+adb -s "${DEVICE_SERIAL}" install -r "${APK_PATH}"
+
+if ! adb -s "${DEVICE_SERIAL}" shell pm list packages "${APP_IDENTIFIER}" | grep -Fq "package:${APP_IDENTIFIER}"; then
+  echo "Error: APK install reported success but package ${APP_IDENTIFIER} is still missing on ${DEVICE_SERIAL}."
+  exit 1
+fi
+
+echo "Launching app..."
+adb -s "${DEVICE_SERIAL}" shell am start -n "${APP_IDENTIFIER}/.MainActivity"

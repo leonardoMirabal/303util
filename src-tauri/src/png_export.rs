@@ -2,7 +2,10 @@ use std::error::Error;
 use std::marker::PhantomData;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::{plugin::{Builder, PluginApi, TauriPlugin}, AppHandle, Manager, Runtime};
+use tauri::{
+    plugin::{Builder, PluginApi, TauriPlugin},
+    AppHandle, Manager, Runtime,
+};
 
 #[cfg(target_os = "android")]
 use tauri::plugin::PluginHandle;
@@ -15,8 +18,8 @@ struct SavePngRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct SavePngResponse {
-    uri: String,
+pub struct SavePngResponse {
+    pub uri: String,
 }
 
 pub trait PngExportExt<R: Runtime> {
@@ -47,7 +50,7 @@ impl<R: Runtime> PngExport<R> {
 #[cfg(not(target_os = "android"))]
 impl<R: Runtime> PngExport<R> {
     fn save_png(&self, _payload: SavePngRequest) -> Result<SavePngResponse, String> {
-        Err("PNG export mobile plugin is only available on Android.".to_string())
+        Err("Android PNG export is only available on Android.".to_string())
     }
 }
 
@@ -70,21 +73,24 @@ fn init_mobile<R: Runtime, C: DeserializeOwned>(
     Ok(PngExport(PhantomData))
 }
 
-#[tauri::command]
-fn save_png<R: Runtime>(app: AppHandle<R>, file_name: String, base64_data: String) -> Result<SavePngResponse, String> {
-    app.png_export().save_png(SavePngRequest {
-        file_name,
-        base64_data,
-    })
-}
-
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("pngExport")
-        .invoke_handler(tauri::generate_handler![save_png])
         .setup(|app, api| {
             let png_export = init_mobile(app, api)?;
             app.manage(png_export);
             Ok(())
         })
         .build()
+}
+
+#[tauri::command]
+pub fn save_android_png<R: Runtime>(
+    app: AppHandle<R>,
+    file_name: String,
+    base64_data: String,
+) -> Result<SavePngResponse, String> {
+    app.png_export().save_png(SavePngRequest {
+        file_name,
+        base64_data,
+    })
 }

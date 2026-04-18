@@ -2514,7 +2514,7 @@ function App() {
     const fileName = buildExportPngFileName();
     const [, base64Data] = url.split(",", 2);
     if (!base64Data) throw new Error("Generated PNG data was empty.");
-    await invoke("plugin:pngExport|save_png", { fileName, base64Data });
+    await invoke("save_android_png", { fileName, base64Data });
     window.alert(`PNG saved to Pictures/303util as ${fileName}.`);
   };
 

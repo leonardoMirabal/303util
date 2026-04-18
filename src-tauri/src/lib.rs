@@ -434,15 +434,16 @@ fn midi_stop_realtime_stream(_midi_worker_state: State<MidiWorkerState>) -> Resu
 pub fn run() {
     tauri::Builder::default()
         .manage(MidiWorkerState::default())
+        .plugin(png_export::init())
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(png_export::init())
         .invoke_handler(tauri::generate_handler![
             desktop_google_drive_access_token,
             open_external_url,
             midi_list_inputs,
             midi_start_realtime_stream,
-            midi_stop_realtime_stream
+            midi_stop_realtime_stream,
+            png_export::save_android_png
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
