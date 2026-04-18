@@ -97,6 +97,11 @@ refresh_android_project() {
     echo "Syncing Android launcher resources into generated project..."
     cp -R "${SCRIPT_DIR}/src-tauri/icons/android/." "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res/"
   fi
+
+  if [ -d "${SCRIPT_DIR}/src-tauri/android-overrides/app/src/main" ]; then
+    echo "Syncing persistent Android overrides into generated project..."
+    cp -R "${SCRIPT_DIR}/src-tauri/android-overrides/app/src/main/." "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/"
+  fi
 }
 
 if [ ! -d "${EXPECTED_ANDROID_PACKAGE_DIR}" ]; then

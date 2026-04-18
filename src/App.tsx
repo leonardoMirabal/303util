@@ -2496,37 +2496,62 @@ function App() {
     return canvas.toDataURL("image/png");
   };
 
+  const buildSafeExportName = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+  const buildExportPngFileName = () => {
+    const baseProgramName = programName.trim() || "program";
+    const exportVoiceCount = getExportVoiceIndices(lines, lineCount).length;
+    const safeProgramName = buildSafeExportName(baseProgramName);
+    return `tb303-${safeProgramName || "program"}-${exportVoiceCount}voice-sheet-${Date.now()}.png`;
+  };
+
+  const saveAndroidExportPng = async (url: string) => {
+    const fileName = buildExportPngFileName();
+    const [, base64Data] = url.split(",", 2);
+    if (!base64Data) throw new Error("Generated PNG data was empty.");
+    await invoke("plugin:pngExport|savePng", { fileName, base64Data });
+    window.alert(`PNG saved to Pictures/303util as ${fileName}.`);
+  };
+
   const generateExportPreview = () => {
     const url = buildExportDataUrl();
     if (url) setExportPreviewUrl(url);
   };
-  const exportSheetPng = (urlOverride?: string) => {
+  const exportSheetPng = async (urlOverride?: string) => {
     const url = urlOverride ?? buildExportDataUrl();
-    if (!url) return;
+    if (!url) {
+      window.alert("PNG export preview could not be generated.");
+      return;
+    }
     setExportPreviewUrl(url);
-    const baseProgramName = programName.trim() || "program";
-    const exportVoiceCount = getExportVoiceIndices(lines, lineCount).length;
-    const safeProgramName = baseProgramName
-      .toLowerCase()
-      .replace(/[^a-z0-9-_]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+    if (isAndroidTauriApp) {
+      try {
+        await saveAndroidExportPng(url);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        window.alert(`PNG export failed: ${message}`);
+      }
+      return;
+    }
     const link = document.createElement("a");
     link.href = url;
-    link.download = `tb303-${safeProgramName || "program"}-${exportVoiceCount}voice-sheet-${Date.now()}.png`;
+    link.download = buildExportPngFileName();
     link.click();
   };
-  const savePreviewPng = () => {
+  const savePreviewPng = async () => {
     if (!exportPreviewUrl) return;
-    exportSheetPng(exportPreviewUrl);
+    await exportSheetPng(exportPreviewUrl);
   };
 
   const exportProjectJson = () => {
     const payload = buildProjectSnapshot();
     const baseProgramName = programName.trim() || "program";
-    const safeProgramName = baseProgramName
-      .toLowerCase()
-      .replace(/[^a-z0-9-_]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+    const safeProgramName = buildSafeExportName(baseProgramName);
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -3342,7 +3367,7 @@ function App() {
       return;
     }
     if (action === "export-png") {
-      exportSheetPng();
+      await exportSheetPng();
       return;
     }
     if (action === "import-json") {
