@@ -12,12 +12,13 @@ The goal of the app is **not** to be a perfect sonic emulator of the TB-303. Its
 
 1. Open the app and click the pattern name strip to choose a library and pattern, or click **New** to start a new one.
 2. Set the pattern length with the length selector in the top bar.
-3. In **Editor**, click notes into the pitch grid.
-4. Set each step in the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
-5. Add **DOWN**, **UP**, **ACC**, and **SLIDE** where needed.
-6. Press **Play** to hear the pattern.
-7. Click **Save** to store it in the current library.
-8. Switch to **Sheet**, click **Refresh**, then **Save PNG** to export the chart.
+3. Select the pattern **section** (`A` or `B`) from the top bar.
+4. In **Editor**, click notes into the pitch grid.
+5. Set each step in the **TIME** row to `N` (note), `T` (tie), or `R` (rest).
+6. Add **DOWN**, **UP**, **ACC**, and **SLIDE** where needed.
+7. Press **Play** to hear the pattern.
+8. Click **Save** to store it in the current library.
+9. Switch to **Sheet**, click **Refresh**, then **Save PNG** to export the chart.
 
 ## Interface overview
 
@@ -28,6 +29,7 @@ The main screen is built around a few controls you will use constantly:
 | **TB-303 util button** | Opens the main menu and project options |
 | **Pattern name strip** | Shows the current `library > pattern` and opens the library/pattern picker |
 | **Length selector** | Sets the active voice length directly from the top bar, up to 32 steps |
+| **A/B selector** | Switches between the two classic TB-303 pattern sections |
 | **Play / New / Init / Save** | Playback, create pattern, clear the current pattern, and save |
 | **Controls / Mods** | On compact layouts, show or hide the sound controls and step modifier lanes |
 | **Voice buttons** | Choose voice `1`, `2`, or `3` for editing |

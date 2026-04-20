@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type SetStateAction } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { refreshToken as refreshNativeGoogleToken, signIn as signInWithNativeGoogle } from "@choochmeque/tauri-plugin-google-auth-api";
 import packageJson from "../package.json";
@@ -43,6 +43,7 @@ type TimeMode = "note" | "tie" | "rest";
 type Transpose = "none" | "down" | "up";
 type PatternTimingMode = "normal" | "triplet";
 type DelaySubdivision = (typeof DELAY_SUBDIVISIONS)[number]["value"];
+type PatternSection = "A" | "B";
 
 type Step = {
   pitch: PitchName | null;
@@ -98,6 +99,11 @@ type LineState = {
   params: VoiceParams;
 };
 
+type PatternSections = {
+  A: LineState[];
+  B: LineState[];
+};
+
 type UpdateDialogState =
   | { kind: "up-to-date"; currentVersion: string }
   | { kind: "available"; currentVersion: string; latestVersion: string; releaseUrl: string }
@@ -113,6 +119,8 @@ type ProjectData = {
   tempo: number;
   selectedLine: number;
   lines: LineState[];
+  sections?: PatternSections;
+  activeSection?: PatternSection;
 };
 
 type LibraryRecord = {
@@ -334,6 +342,21 @@ const makeLine = (): LineState => ({
   })),
   params: defaultParams(),
 });
+
+const cloneLineStates = (source: LineState[]): LineState[] =>
+  source.map((line) => ({
+    ...line,
+    steps: line.steps.map((step) => ({ ...step })),
+    params: { ...line.params },
+  }));
+
+const makePatternSections = (lines: LineState[]): PatternSections => {
+  const sectionA = cloneLineStates(lines);
+  return {
+    A: sectionA,
+    B: cloneLineStates(sectionA),
+  };
+};
 
 const DEFAULT_PROJECT_TEMPLATE: ProjectData = {
   version: 1,
@@ -1364,7 +1387,16 @@ function App() {
   const [scalePresetId, setScalePresetId] = useState<string>(DEFAULT_PROJECT_STATE.scalePresetId ?? "off");
   const [scaleRoot, setScaleRoot] = useState<PitchClass>(DEFAULT_PROJECT_STATE.scaleRoot ?? "C");
   const [workspaceView, setWorkspaceView] = useState<"editor" | "sheet">("editor");
-  const [lines, setLines] = useState<LineState[]>(() => DEFAULT_PROJECT_STATE.lines);
+  const [patternSections, setPatternSections] = useState<PatternSections>(() => makePatternSections(DEFAULT_PROJECT_STATE.lines));
+  const [activePatternSection, setActivePatternSection] = useState<PatternSection>("A");
+  const lines = patternSections[activePatternSection];
+  const setLines = (updater: SetStateAction<LineState[]>) => {
+    setPatternSections((prev) => {
+      const currentLines = prev[activePatternSection];
+      const nextLines = typeof updater === "function" ? (updater as (prevState: LineState[]) => LineState[])(currentLines) : updater;
+      return { ...prev, [activePatternSection]: nextLines };
+    });
+  };
   const [selectedLine, setSelectedLine] = useState(DEFAULT_PROJECT_STATE.selectedLine);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(-1);
@@ -1663,6 +1695,8 @@ function App() {
     tempo,
     selectedLine,
     lines,
+    sections: patternSections,
+    activeSection: activePatternSection,
   });
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? "";
   const googleDesktopClientId = (import.meta.env.VITE_GOOGLE_DESKTOP_CLIENT_ID as string | undefined)?.trim() ?? "";
@@ -1860,6 +1894,18 @@ function App() {
       resetPlaybackState();
     }
     setLines(nextLines);
+  };
+
+  const selectPatternSection = (section: PatternSection) => {
+    if (section === activePatternSection) return;
+    transposeOriginRef.current = null;
+    setActivePatternSection(section);
+    if (isPlayingRef.current) {
+      resetPlaybackState();
+    }
+  };
+  const togglePatternSection = () => {
+    selectPatternSection(activePatternSection === "A" ? "B" : "A");
   };
 
   const transposeCurrentPattern = (semitoneDelta: number) => {
@@ -2334,7 +2380,7 @@ function App() {
 
   useEffect(() => {
     transposeOriginRef.current = null;
-  }, [selectedLibraryId, selectedPatternId]);
+  }, [selectedLibraryId, selectedPatternId, activePatternSection]);
   useEffect(() => {
     if (restoredPatternRef.current || patterns.length === 0) return;
     const lastLibraryId = window.localStorage.getItem(LAST_LIBRARY_ID_KEY);
@@ -2572,103 +2618,118 @@ function App() {
     if (typeof data.tempo !== "number" || !Number.isFinite(data.tempo)) throw new Error("tempo must be a number.");
     if (typeof data.selectedLine !== "number" || !Number.isInteger(data.selectedLine)) throw new Error("selectedLine must be an integer.");
     if (data.selectedLine < 0 || data.selectedLine >= MAX_LINES) throw new Error("selectedLine is out of range.");
-    if (!Array.isArray(data.lines) || data.lines.length < 1 || data.lines.length > MAX_LINES) {
-      throw new Error(`lines must contain between 1 and ${MAX_LINES} voice entries.`);
-    }
-
-    const sourceLines = [...data.lines];
-    while (sourceLines.length < MAX_LINES) sourceLines.push(makeLine());
-
-    const normalizedLines = sourceLines.map((line, lineIndex): LineState => {
-      if (!line || typeof line !== "object") throw new Error(`Voice ${lineIndex + 1} is invalid.`);
-      const lineObj = line as Record<string, unknown>;
-      if (!Array.isArray(lineObj.steps) || lineObj.steps.length > STEPS || lineObj.steps.length < DEFAULT_PATTERN_LENGTH) {
-        throw new Error(`Voice ${lineIndex + 1} must have between ${DEFAULT_PATTERN_LENGTH} and ${STEPS} steps.`);
+    const validateLineCollection = (source: unknown, label: string): LineState[] => {
+      if (!Array.isArray(source) || source.length < 1 || source.length > MAX_LINES) {
+        throw new Error(`${label} must contain between 1 and ${MAX_LINES} voice entries.`);
       }
-      if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`Voice ${lineIndex + 1} params are invalid.`);
-      const timingMode: PatternTimingMode =
-        lineObj.timingMode === "triplet" || lineObj.timingMode === "normal" ? lineObj.timingMode : "normal";
-      const patternLength = typeof lineObj.patternLength === "number" ? lineObj.patternLength : mapLegacyPatternLength(undefined);
-      if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > maxPatternLengthForMode(timingMode)) {
-        throw new Error(`Voice ${lineIndex + 1} patternLength must be between 4 and ${maxPatternLengthForMode(timingMode)}.`);
-      }
-      const paramsRaw = lineObj.params as Record<string, unknown>;
-      if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`Voice ${lineIndex + 1} waveform is invalid.`);
+      const sourceLines = [...source];
+      while (sourceLines.length < MAX_LINES) sourceLines.push(makeLine());
+      return sourceLines.map((line, lineIndex): LineState => {
+        if (!line || typeof line !== "object") throw new Error(`${label} voice ${lineIndex + 1} is invalid.`);
+        const lineObj = line as Record<string, unknown>;
+        if (!Array.isArray(lineObj.steps) || lineObj.steps.length > STEPS || lineObj.steps.length < DEFAULT_PATTERN_LENGTH) {
+          throw new Error(`${label} voice ${lineIndex + 1} must have between ${DEFAULT_PATTERN_LENGTH} and ${STEPS} steps.`);
+        }
+        if (!lineObj.params || typeof lineObj.params !== "object") throw new Error(`${label} voice ${lineIndex + 1} params are invalid.`);
+        const timingMode: PatternTimingMode =
+          lineObj.timingMode === "triplet" || lineObj.timingMode === "normal" ? lineObj.timingMode : "normal";
+        const patternLength = typeof lineObj.patternLength === "number" ? lineObj.patternLength : mapLegacyPatternLength(undefined);
+        if (!Number.isFinite(patternLength) || patternLength < 4 || patternLength > maxPatternLengthForMode(timingMode)) {
+          throw new Error(`${label} voice ${lineIndex + 1} patternLength must be between 4 and ${maxPatternLengthForMode(timingMode)}.`);
+        }
+        const paramsRaw = lineObj.params as Record<string, unknown>;
+        if (paramsRaw.waveform !== "sawtooth" && paramsRaw.waveform !== "square") throw new Error(`${label} voice ${lineIndex + 1} waveform is invalid.`);
 
-      const params: VoiceParams = {
-        waveform: paramsRaw.waveform,
-        tune: Number(paramsRaw.tune),
-        cutoff: Number(paramsRaw.cutoff),
-        resonance: Number(paramsRaw.resonance),
-        envMod: Number(paramsRaw.envMod),
-        decay: Number(paramsRaw.decay),
-        accent: Number(paramsRaw.accent),
-        volume: Number(paramsRaw.volume),
-        delayTime: Number(paramsRaw.delayTime),
-        delaySync: typeof paramsRaw.delaySync === "boolean" ? paramsRaw.delaySync : false,
-        delaySubdivision: isDelaySubdivision(paramsRaw.delaySubdivision) ? paramsRaw.delaySubdivision : "1/8",
-        delayFeedback: Number(paramsRaw.delayFeedback),
-        delayMix: Number(paramsRaw.delayMix),
-        delayTone: typeof paramsRaw.delayTone === "number" ? Number(paramsRaw.delayTone) : 8200,
-        overdrive:
-          typeof paramsRaw.overdrive === "number"
-            ? Number(paramsRaw.overdrive)
-            : typeof paramsRaw.distortion === "number"
-              ? Number(paramsRaw.distortion)
-              : 0,
-        overdriveTone: typeof paramsRaw.overdriveTone === "number" ? Number(paramsRaw.overdriveTone) : 9200,
-        distortion:
-          typeof paramsRaw.overdrive === "number" && typeof paramsRaw.distortion === "number" ? Number(paramsRaw.distortion) : 0,
-        distortionTone: typeof paramsRaw.distortionTone === "number" ? Number(paramsRaw.distortionTone) : 7600,
-        reverb: typeof paramsRaw.reverb === "number" ? Number(paramsRaw.reverb) : 0,
-        reverbTail: typeof paramsRaw.reverbTail === "number" ? Number(paramsRaw.reverbTail) : 2.0,
-        reverbPreDelay: typeof paramsRaw.reverbPreDelay === "number" ? Number(paramsRaw.reverbPreDelay) : 0.02,
-        reverbTone: typeof paramsRaw.reverbTone === "number" ? Number(paramsRaw.reverbTone) : 6800,
-      };
-      if (Object.values(params).some((v) => (typeof v === "number" ? !Number.isFinite(v) : false))) {
-        throw new Error(`Voice ${lineIndex + 1} params contain invalid numbers.`);
-      }
-
-      const parsedSteps: Step[] = lineObj.steps.map((stepRaw, stepIndex) => {
-        if (!stepRaw || typeof stepRaw !== "object") throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} is invalid.`);
-        const step = stepRaw as Record<string, unknown>;
-        if (step.timeMode !== "note" && step.timeMode !== "tie" && step.timeMode !== "rest") {
-          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid timeMode.`);
-        }
-        if (step.transpose !== "none" && step.transpose !== "down" && step.transpose !== "up") {
-          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid transpose.`);
-        }
-        if (typeof step.accent !== "boolean" || typeof step.slide !== "boolean") {
-          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid flags.`);
-        }
-        const pitch = step.pitch === null ? null : isPitchName(step.pitch) ? step.pitch : null;
-        if (step.timeMode === "note" && !pitch) {
-          throw new Error(`Voice ${lineIndex + 1}, step ${stepIndex + 1} note step must have a valid pitch.`);
-        }
-        return {
-          pitch,
-          timeMode: step.timeMode,
-          accent: step.accent,
-          slide: step.slide,
-          transpose: step.transpose,
+        const params: VoiceParams = {
+          waveform: paramsRaw.waveform,
+          tune: Number(paramsRaw.tune),
+          cutoff: Number(paramsRaw.cutoff),
+          resonance: Number(paramsRaw.resonance),
+          envMod: Number(paramsRaw.envMod),
+          decay: Number(paramsRaw.decay),
+          accent: Number(paramsRaw.accent),
+          volume: Number(paramsRaw.volume),
+          delayTime: Number(paramsRaw.delayTime),
+          delaySync: typeof paramsRaw.delaySync === "boolean" ? paramsRaw.delaySync : false,
+          delaySubdivision: isDelaySubdivision(paramsRaw.delaySubdivision) ? paramsRaw.delaySubdivision : "1/8",
+          delayFeedback: Number(paramsRaw.delayFeedback),
+          delayMix: Number(paramsRaw.delayMix),
+          delayTone: typeof paramsRaw.delayTone === "number" ? Number(paramsRaw.delayTone) : 8200,
+          overdrive:
+            typeof paramsRaw.overdrive === "number"
+              ? Number(paramsRaw.overdrive)
+              : typeof paramsRaw.distortion === "number"
+                ? Number(paramsRaw.distortion)
+                : 0,
+          overdriveTone: typeof paramsRaw.overdriveTone === "number" ? Number(paramsRaw.overdriveTone) : 9200,
+          distortion:
+            typeof paramsRaw.overdrive === "number" && typeof paramsRaw.distortion === "number" ? Number(paramsRaw.distortion) : 0,
+          distortionTone: typeof paramsRaw.distortionTone === "number" ? Number(paramsRaw.distortionTone) : 7600,
+          reverb: typeof paramsRaw.reverb === "number" ? Number(paramsRaw.reverb) : 0,
+          reverbTail: typeof paramsRaw.reverbTail === "number" ? Number(paramsRaw.reverbTail) : 2.0,
+          reverbPreDelay: typeof paramsRaw.reverbPreDelay === "number" ? Number(paramsRaw.reverbPreDelay) : 0.02,
+          reverbTone: typeof paramsRaw.reverbTone === "number" ? Number(paramsRaw.reverbTone) : 6800,
         };
-      });
-      const steps: Step[] =
-        parsedSteps.length === STEPS
-          ? parsedSteps
-          : [
-              ...parsedSteps,
-              ...Array.from({ length: STEPS - parsedSteps.length }, (): Step => ({
-                pitch: null,
-                timeMode: "rest",
-                accent: false,
-                slide: false,
-                transpose: "none",
-              })),
-            ];
+        if (Object.values(params).some((v) => (typeof v === "number" ? !Number.isFinite(v) : false))) {
+          throw new Error(`${label} voice ${lineIndex + 1} params contain invalid numbers.`);
+        }
 
-      return { timingMode, patternLength: clampPatternLength(patternLength, timingMode), steps, params };
-    });
+        const parsedSteps: Step[] = lineObj.steps.map((stepRaw, stepIndex) => {
+          if (!stepRaw || typeof stepRaw !== "object") throw new Error(`${label} voice ${lineIndex + 1}, step ${stepIndex + 1} is invalid.`);
+          const step = stepRaw as Record<string, unknown>;
+          if (step.timeMode !== "note" && step.timeMode !== "tie" && step.timeMode !== "rest") {
+            throw new Error(`${label} voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid timeMode.`);
+          }
+          if (step.transpose !== "none" && step.transpose !== "down" && step.transpose !== "up") {
+            throw new Error(`${label} voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid transpose.`);
+          }
+          if (typeof step.accent !== "boolean" || typeof step.slide !== "boolean") {
+            throw new Error(`${label} voice ${lineIndex + 1}, step ${stepIndex + 1} has invalid flags.`);
+          }
+          const pitch = step.pitch === null ? null : isPitchName(step.pitch) ? step.pitch : null;
+          if (step.timeMode === "note" && !pitch) {
+            throw new Error(`${label} voice ${lineIndex + 1}, step ${stepIndex + 1} note step must have a valid pitch.`);
+          }
+          return {
+            pitch,
+            timeMode: step.timeMode,
+            accent: step.accent,
+            slide: step.slide,
+            transpose: step.transpose,
+          };
+        });
+        const steps: Step[] =
+          parsedSteps.length === STEPS
+            ? parsedSteps
+            : [
+                ...parsedSteps,
+                ...Array.from({ length: STEPS - parsedSteps.length }, (): Step => ({
+                  pitch: null,
+                  timeMode: "rest",
+                  accent: false,
+                  slide: false,
+                  transpose: "none",
+                })),
+              ];
+
+        return { timingMode, patternLength: clampPatternLength(patternLength, timingMode), steps, params };
+      });
+    };
+
+    const activeSection: PatternSection = data.activeSection === "B" ? "B" : "A";
+    const sectionsRaw = data.sections;
+    let normalizedSections: PatternSections;
+    if (sectionsRaw && typeof sectionsRaw === "object") {
+      const sectionRecord = sectionsRaw as Partial<Record<PatternSection, unknown>>;
+      if (!sectionRecord.A || !sectionRecord.B) throw new Error("sections must include both A and B.");
+      normalizedSections = {
+        A: validateLineCollection(sectionRecord.A, "sections.A"),
+        B: validateLineCollection(sectionRecord.B, "sections.B"),
+      };
+    } else {
+      normalizedSections = makePatternSections(validateLineCollection(data.lines, "lines"));
+    }
+    const activeLines = normalizedSections[activeSection];
 
     return {
       version: 1,
@@ -2679,7 +2740,9 @@ function App() {
       scaleRoot,
       tempo: data.tempo,
       selectedLine: Math.min(data.selectedLine, data.lineCount - 1),
-      lines: normalizedLines,
+      lines: activeLines,
+      sections: normalizedSections,
+      activeSection,
     };
   };
 
@@ -2696,7 +2759,8 @@ function App() {
       setScaleRoot(parsed.scaleRoot ?? "C");
       setProjectTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
-      setLines(parsed.lines);
+      setPatternSections(parsed.sections ?? makePatternSections(parsed.lines));
+      setActivePatternSection(parsed.activeSection ?? "A");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid project JSON.";
       window.alert(`Import failed: ${message}`);
@@ -3274,7 +3338,8 @@ function App() {
       setScaleRoot(parsed.scaleRoot ?? "C");
       setProjectTempo(parsed.tempo);
       setSelectedLine(parsed.selectedLine);
-      setLines(parsed.lines);
+      setPatternSections(parsed.sections ?? makePatternSections(parsed.lines));
+      setActivePatternSection(parsed.activeSection ?? "A");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid stored pattern.";
       window.alert(`Load failed: ${message}`);
@@ -3439,7 +3504,8 @@ function App() {
     setProjectTempo(blankProject.tempo);
     setSelectedLine(blankProject.selectedLine);
     setSheetNotes(blankProject.notes ?? "");
-    setLines(blankProject.lines);
+    setPatternSections(makePatternSections(blankProject.lines));
+    setActivePatternSection("A");
   };
 
   const initCurrentPattern = () => {
@@ -4084,6 +4150,18 @@ function App() {
               })}
             </select>
           </label>
+          <div className="mobile-group-field">
+            Section
+            <button
+              type="button"
+              className={`pattern-section-button${activePatternSection === "B" ? " selected" : ""}`}
+              onClick={togglePatternSection}
+              aria-label={`Switch to section ${activePatternSection === "A" ? "B" : "A"}`}
+              title={`Switch to section ${activePatternSection === "A" ? "B" : "A"}`}
+            >
+              {activePatternSection}
+            </button>
+          </div>
           <div className="mobile-group-actions">
             <button type="button" onClick={initCurrentPattern}>
               Init
@@ -4602,6 +4680,15 @@ function App() {
                 </div>
                 <button
                   type="button"
+                  className={`pattern-section-button${activePatternSection === "B" ? " selected" : ""}`}
+                  onClick={togglePatternSection}
+                  aria-label={`Switch to section ${activePatternSection === "A" ? "B" : "A"}`}
+                  title={`Switch to section ${activePatternSection === "A" ? "B" : "A"}`}
+                >
+                  {activePatternSection}
+                </button>
+                <button
+                  type="button"
                   className={`mobile-controls-toggle ${mobileControlsOpen ? "selected" : ""}`}
                   onClick={() => setMobileControlsOpen((open) => !open)}
                   aria-expanded={mobileControlsOpen}
@@ -4686,6 +4773,15 @@ function App() {
                   })}
                 </select>
               </div>
+              <button
+                type="button"
+                className={`pattern-section-button${activePatternSection === "B" ? " selected" : ""}`}
+                onClick={togglePatternSection}
+                aria-label={`Switch to section ${activePatternSection === "A" ? "B" : "A"}`}
+                title={`Switch to section ${activePatternSection === "A" ? "B" : "A"}`}
+              >
+                {activePatternSection}
+              </button>
               <button type="button" className="mobile-menu-button" onClick={() => openNewPatternModal(selectedLibraryId)} aria-label="New pattern" title="New pattern">
                 New
               </button>
