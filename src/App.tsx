@@ -330,16 +330,18 @@ const defaultParams = (): VoiceParams => ({
   reverbTone: 6800,
 });
 
+const makeEmptyStep = (): Step => ({
+  pitch: null,
+  timeMode: "rest",
+  accent: false,
+  slide: false,
+  transpose: "none",
+});
+
 const makeLine = (): LineState => ({
   timingMode: "normal",
   patternLength: DEFAULT_PATTERN_LENGTH,
-  steps: Array.from({ length: STEPS }, () => ({
-    pitch: null,
-    timeMode: "rest",
-    accent: false,
-    slide: false,
-    transpose: "none",
-  })),
+  steps: Array.from({ length: STEPS }, makeEmptyStep),
   params: defaultParams(),
 });
 
@@ -352,9 +354,13 @@ const cloneLineStates = (source: LineState[]): LineState[] =>
 
 const makePatternSections = (lines: LineState[]): PatternSections => {
   const sectionA = cloneLineStates(lines);
+  const sectionB = sectionA.map((line) => ({
+    ...line,
+    steps: Array.from({ length: STEPS }, makeEmptyStep),
+  }));
   return {
     A: sectionA,
-    B: cloneLineStates(sectionA),
+    B: sectionB,
   };
 };
 
