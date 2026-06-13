@@ -80,11 +80,17 @@ jobs:
       - name: Install Android packages
         run: |
           yes | sdkmanager --licenses
-          sdkmanager \
-            "platform-tools" \
-            "build-tools;35.0.0" \
-            "platforms;android-35" \
-            "ndk;29.0.13846066"
+          sdkmanager "platform-tools" "ndk;29.0.13846066"
+          SELECTED_ANDROID_API=""
+          for api in 36 35; do
+            if sdkmanager "build-tools;${api}.0.0" "platforms;android-${api}"; then
+              SELECTED_ANDROID_API="${api}"
+              break
+            fi
+          done
+          : "${SELECTED_ANDROID_API:?Failed to install a supported Android SDK platform.}"
+          echo "ANDROID_COMPILE_SDK_VERSION=${SELECTED_ANDROID_API}" >> "$GITHUB_ENV"
+          echo "ANDROID_TARGET_SDK_VERSION=${SELECTED_ANDROID_API}" >> "$GITHUB_ENV"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
